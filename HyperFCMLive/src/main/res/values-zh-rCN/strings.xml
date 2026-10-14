@@ -2,9 +2,6 @@
 <resources>
     <string name="app_name">Hyper FCM Live</string>
     <string name="xposed_description">解除国行 HyperOS 对 FCM 连接广播及所选应用唤醒的限制。启用后耗电可能增加。</string>
-    <string name="settings_title">FCM 唤醒白名单</string>
-    <string name="settings_hint">允许模块在 FCM 消息到达时唤醒勾选的应用。仅适配已 Root 并安装 LSPosed 的国行 HyperOS。</string>
-    <string name="fcm_detection_hint">“包含 FCM”表示检测到推送组件，不代表连接正常。定制接入可能无法识别。</string>
     <string name="select_all">全选当前列表</string>
     <string name="clear_all">清除当前选择</string>
     <string name="search_hint">搜索应用名或包名…</string>
@@ -17,7 +14,6 @@
     <string name="loading_apps">正在检测已安装应用…</string>
     <string name="no_apps">没有匹配的应用，请检查筛选条件和应用列表权限。</string>
     <string name="load_failed">无法读取应用，请检查应用列表权限后重新打开。</string>
-    <string name="service_connected">已连接 LSPosed · 选择后自动保存</string>
     <string name="service_unavailable">未连接 LSPosed，请启用模块后重新打开以保存选择。</string>
     <string name="save_failed">保存失败，已恢复原有选择。</string>
 </resources>

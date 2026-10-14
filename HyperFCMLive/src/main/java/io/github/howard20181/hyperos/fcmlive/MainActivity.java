@@ -28,12 +28,16 @@ import io.github.libxposed.service.XposedServiceHelper;
 
 /** Manual FCM wake allowlist for China HyperOS. */
 public class MainActivity extends Activity implements SearchView.OnQueryTextListener {
+    private static final String UI_SETTINGS = "ui_settings";
+    private static final String SHOW_SYSTEM_APPS = "show_system_apps";
+    private static final String ONLY_FCM = "only_fcm";
     private final List<AppListAdapter.AppEntry> allApps = new ArrayList<>();
     private final List<AppListAdapter.AppEntry> filteredApps = new ArrayList<>();
     private final ExecutorService appLoader = Executors.newSingleThreadExecutor();
     private Set<String> allowlist = new HashSet<>();
     private AppListAdapter adapter;
     private SearchView searchView;
+    private SharedPreferences uiSettings;
     private boolean showSystemApps;
     private boolean onlyFcm;
     private boolean loading = true;
@@ -52,10 +56,9 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         });
         root.requestApplyInsets();
 
-        if (savedInstanceState != null) {
-            showSystemApps = savedInstanceState.getBoolean("system");
-            onlyFcm = savedInstanceState.getBoolean("fcm");
-        }
+        uiSettings = getSharedPreferences(UI_SETTINGS, MODE_PRIVATE);
+        showSystemApps = uiSettings.getBoolean(SHOW_SYSTEM_APPS, false);
+        onlyFcm = uiSettings.getBoolean(ONLY_FCM, false);
         searchView = findViewById(R.id.search_view);
         adapter = new AppListAdapter(this, filteredApps, (pkg, checked) -> {
             Set<String> updated = new HashSet<>(allowlist);
@@ -71,12 +74,14 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         system.setChecked(showSystemApps);
         system.setOnCheckedChangeListener((button, checked) -> {
             showSystemApps = checked;
+            uiSettings.edit().putBoolean(SHOW_SYSTEM_APPS, checked).apply();
             filterApps();
         });
         CheckBox fcm = findViewById(R.id.cb_fcm_only);
         fcm.setChecked(onlyFcm);
         fcm.setOnCheckedChangeListener((button, checked) -> {
             onlyFcm = checked;
+            uiSettings.edit().putBoolean(ONLY_FCM, checked).apply();
             filterApps();
         });
         findViewById(R.id.btn_select_all).setOnClickListener(v -> setVisibleChecked(true));
@@ -87,8 +92,6 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
 
     @Override
     protected void onSaveInstanceState(Bundle state) {
-        state.putBoolean("system", showSystemApps);
-        state.putBoolean("fcm", onlyFcm);
         state.putString("query", searchView.getQuery().toString());
         super.onSaveInstanceState(state);
     }
@@ -160,7 +163,6 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                         SharedPreferences prefs = remotePrefs();
                         if (prefs != null) {
                             allowlist = Prefs.readAllowlist(prefs);
-                            ((TextView) findViewById(R.id.service_status)).setText(R.string.service_connected);
                             refreshSelection();
                         }
                     });
@@ -171,12 +173,11 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                     runOnUiThread(() -> {
                         if (isDestroyed() || xposedService != service) return;
                         xposedService = null;
-                        ((TextView) findViewById(R.id.service_status)).setText(R.string.service_unavailable);
                     });
                 }
             });
         } catch (RuntimeException e) {
-            // The initial status already explains that LSPosed is unavailable.
+            // Show an error only when the user tries to save without LSPosed.
         }
     }
 

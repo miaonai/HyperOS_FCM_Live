@@ -1,9 +1,6 @@
 <resources>
     <string name="app_name">Hyper FCM Live</string>
     <string name="xposed_description">Remove China HyperOS restrictions on FCM connection broadcasts and wake selected apps. Power consumption may increase.</string>
-    <string name="settings_title">FCM wake allowlist</string>
-    <string name="settings_hint">Allow the module to wake selected apps when an FCM message arrives. For China HyperOS with Root and LSPosed.</string>
-    <string name="fcm_detection_hint">“Contains FCM” indicates messaging components, not a working push connection. Custom integrations may go undetected.</string>
     <string name="select_all">Select visible</string>
     <string name="clear_all">Clear visible</string>
     <string name="search_hint">App name or package…</string>
@@ -16,7 +13,6 @@
     <string name="loading_apps">Checking installed apps…</string>
     <string name="no_apps">No matching apps. Check filters and app list permission.</string>
     <string name="load_failed">Could not read apps. Check app list permission and reopen.</string>
-    <string name="service_connected">LSPosed connected · selections save automatically</string>
     <string name="service_unavailable">LSPosed not connected. Enable the module and reopen to save selections.</string>
     <string name="save_failed">Could not save. Your selection has been restored.</string>
 </resources>
