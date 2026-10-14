@@ -17,3 +17,6 @@ local.properties
 *.keystore
 *.p12
 /.idea/*
+/HyperFCMLive/build/
+/hiddenapi/**/build/
+/dist/

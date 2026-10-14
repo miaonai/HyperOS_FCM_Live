@@ -26,28 +26,92 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Write key
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+      - name: Prepare release signing key
+        if: github.event_name != 'pull_request'
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+          ALIAS: ${{ secrets.ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          if [ ! -z "${{ secrets.SIGNING_KEY }}" ]; then
-          echo storePassword='${{ secrets.KEY_STORE_PASSWORD }}' >> local.properties
-          echo keyAlias='${{ secrets.ALIAS }}' >> local.properties
-          echo keyPassword='${{ secrets.KEY_PASSWORD }}' >> local.properties
-          echo storeFile='key.jks' >> local.properties
-          echo ${{ secrets.SIGNING_KEY }} | base64 --decode > key.jks
+          if [ -z "$SIGNING_KEY" ] || [ -z "$KEY_STORE_PASSWORD" ] || [ -z "$ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "Android release signing secrets are required for non-PR builds." >&2
+            exit 1
           fi
+          printf '%s' "$SIGNING_KEY" | base64 --decode > "$RUNNER_TEMP/release-key.jks"
+          test -s "$RUNNER_TEMP/release-key.jks"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
 
-      - name: Build with Gradle
-        run: ./gradlew --no-daemon :HyperFCMLive:assembleRelease :HyperFCMLive:assembleDebug
+      - name: Build, test, and lint
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/release-key.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            unset ANDROID_KEYSTORE_PATH ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD
+            ./gradlew --no-daemon :HyperFCMLive:assembleDebug :HyperFCMLive:lintRelease :HyperFCMLive:testReleaseUnitTest
+          else
+            ./gradlew --no-daemon :HyperFCMLive:assembleRelease :HyperFCMLive:assembleDebug :HyperFCMLive:lintRelease :HyperFCMLive:testReleaseUnitTest
+          fi
+
+      - name: Verify release APK
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$sdk_root" ]; then
+            echo "Android SDK path is not configured." >&2
+            exit 1
+          fi
+          build_tools="$(find "$sdk_root/build-tools" -mindepth 1 -maxdepth 1 -type d -print | sort -V | tail -n 1)"
+          if [ -z "$build_tools" ] || [ ! -x "$build_tools/apksigner" ] || [ ! -x "$build_tools/aapt" ]; then
+            echo "Android build-tools with apksigner and aapt are required." >&2
+            exit 1
+          fi
+          mapfile -t apks < <(find HyperFCMLive/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print | sort)
+          if [ "${#apks[@]}" -eq 0 ]; then
+            echo "No release APK was produced." >&2
+            exit 1
+          fi
+          verification="HyperFCMLive/build/outputs/apk/release/verification.txt"
+          : > "$verification"
+          for apk in "${apks[@]}"; do
+            printf 'APK: %s\n\n' "$apk" | tee -a "$verification"
+            "$build_tools/apksigner" verify --verbose --print-certs "$apk" 2>&1 | tee -a "$verification"
+            "$build_tools/aapt" dump badging "$apk" > "$RUNNER_TEMP/release-badging.txt"
+            if grep -Fxq 'application-debuggable' "$RUNNER_TEMP/release-badging.txt"; then
+              cat "$RUNNER_TEMP/release-badging.txt" | tee -a "$verification"
+              echo "APK is marked debuggable." | tee -a "$verification" >&2
+              exit 1
+            fi
+            cat "$RUNNER_TEMP/release-badging.txt" | tee -a "$verification"
+            echo "Badging check: application-debuggable flag absent." | tee -a "$verification"
+            printf '\n' | tee -a "$verification"
+          done
+
+      - name: Upload validation reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: validation-reports
+          path: |
+            HyperFCMLive/build/reports/tests/
+            HyperFCMLive/build/reports/lint-results-release.*
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Upload release artifact
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v7
         with:
           name: hyperos-fcm-live-release
-          path: HyperFCMLive/build/outputs/apk/release/*.apk
+          path: |
+            HyperFCMLive/build/outputs/apk/release/*.apk
+            HyperFCMLive/build/outputs/apk/release/verification.txt
           if-no-files-found: error
           retention-days: 30
 

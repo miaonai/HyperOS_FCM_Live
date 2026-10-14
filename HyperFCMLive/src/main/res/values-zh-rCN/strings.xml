@@ -1,11 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">修复澎湃系统谷歌推送重连</string>
-    <string name="xposed_description">去除澎湃系统对谷歌推送连接相关广播的限制。启用模块后，系统耗电可能会增加。</string>
+    <string name="app_name">Hyper FCM Live</string>
+    <string name="xposed_description">解除国行 HyperOS 对 FCM 连接广播及所选应用唤醒的限制。启用后耗电可能增加。</string>
     <string name="settings_title">FCM 唤醒白名单</string>
-    <string name="settings_hint">只有下方勾选的应用，才会被 FCM 推送唤醒 / 自动拉起。未勾选的应用不会被唤醒（即使已开启通知）。</string>
-    <string name="select_all">全选</string>
-    <string name="clear_all">清空</string>
-    <string name="search_hint">搜索应用…</string>
+    <string name="settings_hint">允许模块在 FCM 消息到达时唤醒勾选的应用。仅适配已 Root 并安装 LSPosed 的国行 HyperOS。</string>
+    <string name="fcm_detection_hint">“包含 FCM”表示检测到推送组件，不代表连接正常。定制接入可能无法识别。</string>
+    <string name="select_all">全选当前列表</string>
+    <string name="clear_all">清除当前选择</string>
+    <string name="search_hint">搜索应用名或包名…</string>
     <string name="show_system_apps">显示系统应用</string>
+    <string name="show_fcm_only">仅显示 FCM</string>
+    <string name="contains_fcm">包含 FCM</string>
+    <string name="fcm_not_detected">未检测到 FCM</string>
+    <string name="allow_wake_app">允许 FCM 唤醒%1$s</string>
+    <string name="app_count">显示 %1$d 个 · 白名单共 %2$d 个</string>
+    <string name="loading_apps">正在检测已安装应用…</string>
+    <string name="no_apps">没有匹配的应用，请检查筛选条件和应用列表权限。</string>
+    <string name="load_failed">无法读取应用，请检查应用列表权限后重新打开。</string>
+    <string name="service_connected">已连接 LSPosed · 选择后自动保存</string>
+    <string name="service_unavailable">未连接 LSPosed，请启用模块后重新打开以保存选择。</string>
+    <string name="save_failed">保存失败，已恢复原有选择。</string>
 </resources>

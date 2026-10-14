@@ -29,10 +29,13 @@ public class AppListAdapter extends BaseAdapter {
         public Drawable icon;   // loaded lazily, null until resolved
         public volatile boolean iconLoading;
         public boolean checked;
+        public boolean systemApp;
+        public final boolean containsFcm;
 
-        public AppEntry(String packageName, String label) {
+        public AppEntry(String packageName, String label, boolean containsFcm) {
             this.packageName = packageName;
             this.label = label;
+            this.containsFcm = containsFcm;
         }
     }
 
@@ -74,6 +77,7 @@ public class AppListAdapter extends BaseAdapter {
             holder.icon = convertView.findViewById(R.id.app_icon);
             holder.label = convertView.findViewById(R.id.app_label);
             holder.pkg = convertView.findViewById(R.id.app_pkg);
+            holder.fcm = convertView.findViewById(R.id.app_fcm);
             holder.check = convertView.findViewById(R.id.app_check);
             convertView.setTag(holder);
         } else {
@@ -82,6 +86,11 @@ public class AppListAdapter extends BaseAdapter {
         AppEntry app = getItem(position);
         holder.label.setText(app.label);
         holder.pkg.setText(app.packageName);
+        holder.fcm.setText(app.containsFcm ? R.string.contains_fcm : R.string.fcm_not_detected);
+        holder.fcm.setTextColor(inflater.getContext().getColor(
+                app.containsFcm ? R.color.fcm_text : R.color.text_secondary));
+        holder.fcm.setBackgroundResource(app.containsFcm
+                ? R.drawable.bg_fcm_badge : R.drawable.bg_neutral_badge);
         if (app.icon != null) {
             holder.icon.setImageDrawable(app.icon);
         } else {
@@ -91,18 +100,26 @@ public class AppListAdapter extends BaseAdapter {
         }
         holder.check.setOnCheckedChangeListener(null);
         holder.check.setChecked(app.checked);
+        holder.check.setContentDescription(inflater.getContext().getString(
+                R.string.allow_wake_app, app.label));
         holder.check.setOnCheckedChangeListener((buttonView, isChecked) -> {
             app.checked = isChecked;
             if (listener != null) {
                 listener.onCheckedChanged(app.packageName, isChecked);
             }
         });
+        convertView.setOnClickListener(v -> holder.check.performClick());
         return convertView;
+    }
+
+    void close() {
+        iconLoader.shutdownNow();
+        mainHandler.removeCallbacksAndMessages(null);
     }
 
     /** Load an app icon off the main thread, then refresh the row once ready. */
     private void loadIcon(final AppEntry app) {
-        if (app.iconLoading) {
+        if (app.iconLoading || iconLoader.isShutdown()) {
             return;
         }
         app.iconLoading = true;
@@ -114,11 +131,12 @@ public class AppListAdapter extends BaseAdapter {
                 d = null;
             }
             final Drawable loaded = d;
-            app.iconLoading = false;
-            if (loaded != null) {
+            mainHandler.post(() -> {
+                if (iconLoader.isShutdown()) return;
+                app.iconLoading = false;
                 app.icon = loaded;
-                mainHandler.post(AppListAdapter.this::notifyDataSetChanged);
-            }
+                if (loaded != null) notifyDataSetChanged();
+            });
         });
     }
 
@@ -126,6 +144,7 @@ public class AppListAdapter extends BaseAdapter {
         ImageView icon;
         TextView label;
         TextView pkg;
+        TextView fcm;
         CheckBox check;
     }
 }

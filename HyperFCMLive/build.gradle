@@ -2,6 +2,34 @@ plugins {
     id 'com.android.application'
 }
 
+def localProperties = new Properties()
+def localPropertiesFile = project.rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localProperties.load(localPropertiesFile.newDataInputStream())
+}
+
+def environmentSigning = [
+    storeFile: System.getenv('ANDROID_KEYSTORE_PATH'),
+    storePassword: System.getenv('ANDROID_KEYSTORE_PASSWORD'),
+    keyAlias: System.getenv('ANDROID_KEY_ALIAS'),
+    keyPassword: System.getenv('ANDROID_KEY_PASSWORD')
+]
+def localSigning = [
+    storeFile: localProperties.getProperty('storeFile'),
+    storePassword: localProperties.getProperty('storePassword'),
+    keyAlias: localProperties.getProperty('keyAlias'),
+    keyPassword: localProperties.getProperty('keyPassword')
+]
+def completeSigningConfig = { values ->
+    values.values().every { value -> value != null && !value.trim().isEmpty() }
+}
+def releaseSigning = completeSigningConfig(environmentSigning) ? environmentSigning :
+    (completeSigningConfig(localSigning) ? localSigning : null)
+def hasReleaseSigning = releaseSigning != null
+if (hasReleaseSigning && !project.rootProject.file(releaseSigning.storeFile).isFile()) {
+    throw new GradleException('The configured Android release keystore does not exist.')
+}
+
 android {
     compileSdk 37
 
@@ -10,36 +38,24 @@ android {
         minSdkVersion 27
         targetSdkVersion 37
         versionCode rootProject.ext.commitCount
-        versionName "1.5.0-beta1"
-    }
-
-    Properties localProperties = new Properties()
-    if (project.rootProject.file('local.properties').exists()) {
-        localProperties.load(project.rootProject.file('local.properties').newDataInputStream())
+        versionName "1.5.0-beta2"
     }
 
     signingConfigs {
-        if (localProperties.getProperty("storeFile") != null) {
-            config {
-                storeFile project.rootProject.file(localProperties.getProperty("storeFile"))
-                storePassword localProperties.getProperty("storePassword")
-                keyAlias localProperties.getProperty("keyAlias")
-                keyPassword localProperties.getProperty("keyPassword")
+        if (hasReleaseSigning) {
+            release {
+                storeFile project.rootProject.file(releaseSigning.storeFile)
+                storePassword releaseSigning.storePassword
+                keyAlias releaseSigning.keyAlias
+                keyPassword releaseSigning.keyPassword
             }
         }
     }
 
     buildTypes {
-        debug {
-            if (localProperties.getProperty("storeFile") != null) {
-                signingConfig signingConfigs.config
-            }
-        }
         release {
-            if (localProperties.getProperty("storeFile") != null) {
-                signingConfig signingConfigs.config
-            } else {
-                signingConfig signingConfigs.debug
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
             }
             minifyEnabled true
             proguardFiles 'proguard-rules.pro'
@@ -71,6 +87,15 @@ android {
     namespace 'io.github.howard20181.hyperos.fcmlive'
 }
 
+gradle.taskGraph.whenReady { taskGraph ->
+    def releasePackagingTasks = taskGraph.allTasks.findAll { task ->
+        task.project == project && task.name in ['assembleRelease', 'bundleRelease', 'packageRelease', 'installRelease']
+    }
+    if (!releasePackagingTasks.isEmpty() && !hasReleaseSigning) {
+        throw new GradleException('Release APK/AAB tasks require signing. Set Android signing environment variables or local.properties.')
+    }
+}
+
 base {
     archivesName = project.name + "-" + android.defaultConfig.versionName + "." + android.defaultConfig.versionCode
 }
@@ -82,3 +107,5 @@ dependencies {
     compileOnly project(":hiddenapi:stubs")
     implementation project(":hiddenapi:bridge")
 }
+
+apply from: 'fcm-tests.gradle'

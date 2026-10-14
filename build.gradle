@@ -11,4 +11,4 @@ tasks.named("updateDaemonJvm") {
     vendor = JvmVendorSpec.ADOPTIUM
 }
 var repo = jgit.repo(true)
-ext.commitCount = repo.commitCount('refs/remotes/origin/main')
+ext.commitCount = repo.commitCount('HEAD')

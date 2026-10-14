@@ -3,280 +3,242 @@ package io.github.howard20181.hyperos.fcmlive;
 import android.app.Activity;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
-import android.text.TextUtils;
-import android.widget.Button;
+import android.view.View;
 import android.widget.CheckBox;
 import android.widget.ListView;
 import android.widget.SearchView;
+import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import io.github.libxposed.service.XposedService;
 import io.github.libxposed.service.XposedServiceHelper;
 
-/**
- * Settings screen: lets the user pick which apps FCM is allowed to wake /
- * auto-launch (manual whitelist). Apps not checked are never woken.
- */
+/** Manual FCM wake allowlist for China HyperOS. */
 public class MainActivity extends Activity implements SearchView.OnQueryTextListener {
-
     private final List<AppListAdapter.AppEntry> allApps = new ArrayList<>();
     private final List<AppListAdapter.AppEntry> filteredApps = new ArrayList<>();
+    private final ExecutorService appLoader = Executors.newSingleThreadExecutor();
     private Set<String> allowlist = new HashSet<>();
     private AppListAdapter adapter;
     private SearchView searchView;
-    // Don't show system apps by default; toggle to include them.
-    private boolean showSystemApps = false;
+    private boolean showSystemApps;
+    private boolean onlyFcm;
+    private boolean loading = true;
     private XposedService xposedService;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        setTitle(R.string.settings_title);
+        // Respect status/navigation bars, including enforced edge-to-edge on newer Android.
+        View root = findViewById(R.id.root);
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
+                    insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
+            return insets.consumeSystemWindowInsets();
+        });
+        root.requestApplyInsets();
 
-        initXposedService();
-
+        if (savedInstanceState != null) {
+            showSystemApps = savedInstanceState.getBoolean("system");
+            onlyFcm = savedInstanceState.getBoolean("fcm");
+        }
+        searchView = findViewById(R.id.search_view);
         adapter = new AppListAdapter(this, filteredApps, (pkg, checked) -> {
-            if (checked) {
-                allowlist.add(pkg);
-            } else {
-                allowlist.remove(pkg);
-            }
-            updateAllowlist();
-            // Re-sort so the just-toggled app moves to/from the top.
-            for (AppListAdapter.AppEntry app : allApps) {
-                if (app.packageName.equals(pkg)) {
-                    app.checked = checked;
-                    break;
-                }
-            }
-            sortApps();
-            filterApps(searchView.getQuery().toString());
+            Set<String> updated = new HashSet<>(allowlist);
+            if (checked) updated.add(pkg); else updated.remove(pkg);
+            saveAllowlist(updated);
         });
         ((ListView) findViewById(R.id.app_list)).setAdapter(adapter);
-
-        searchView = findViewById(R.id.search_view);
         searchView.setOnQueryTextListener(this);
-
-        CheckBox cbSystemApps = findViewById(R.id.cb_system_apps);
-        cbSystemApps.setChecked(showSystemApps);
-        cbSystemApps.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            showSystemApps = isChecked;
-            // loadApps runs off the main thread and refreshes the list on completion.
-            loadApps();
+        if (savedInstanceState != null) {
+            searchView.setQuery(savedInstanceState.getString("query", ""), false);
+        }
+        CheckBox system = findViewById(R.id.cb_system_apps);
+        system.setChecked(showSystemApps);
+        system.setOnCheckedChangeListener((button, checked) -> {
+            showSystemApps = checked;
+            filterApps();
         });
-
-        Button selectAll = findViewById(R.id.btn_select_all);
-        Button clearAll = findViewById(R.id.btn_clear_all);
-        selectAll.setOnClickListener(v -> setAllChecked(true));
-        clearAll.setOnClickListener(v -> setAllChecked(false));
-
+        CheckBox fcm = findViewById(R.id.cb_fcm_only);
+        fcm.setChecked(onlyFcm);
+        fcm.setOnCheckedChangeListener((button, checked) -> {
+            onlyFcm = checked;
+            filterApps();
+        });
+        findViewById(R.id.btn_select_all).setOnClickListener(v -> setVisibleChecked(true));
+        findViewById(R.id.btn_clear_all).setOnClickListener(v -> setVisibleChecked(false));
+        initXposedService();
         loadApps();
     }
 
     @Override
-    public boolean onQueryTextSubmit(String query) {
-        return false;
+    protected void onSaveInstanceState(Bundle state) {
+        state.putBoolean("system", showSystemApps);
+        state.putBoolean("fcm", onlyFcm);
+        state.putString("query", searchView.getQuery().toString());
+        super.onSaveInstanceState(state);
     }
 
     @Override
-    public boolean onQueryTextChange(String newText) {
-        filterApps(newText);
+    protected void onDestroy() {
+        appLoader.shutdownNow();
+        adapter.close();
+        super.onDestroy();
+    }
+
+    @Override
+    public boolean onQueryTextSubmit(String query) { return false; }
+
+    @Override
+    public boolean onQueryTextChange(String query) {
+        filterApps();
         return true;
     }
 
-    private void filterApps(String query) {
+    private void filterApps() {
+        String query = searchView.getQuery().toString().trim().toLowerCase(Locale.ROOT);
         filteredApps.clear();
-        if (TextUtils.isEmpty(query)) {
-            filteredApps.addAll(allApps);
-        } else {
-            String lower = query.toLowerCase();
-            for (AppListAdapter.AppEntry app : allApps) {
-                if (app.label.toLowerCase().contains(lower)
-                        || app.packageName.toLowerCase().contains(lower)) {
-                    filteredApps.add(app);
-                }
+        for (AppListAdapter.AppEntry app : allApps) {
+            if (!showSystemApps && app.systemApp) continue;
+            if (onlyFcm && !app.containsFcm) continue;
+            if (app.label.toLowerCase(Locale.ROOT).contains(query)
+                    || app.packageName.toLowerCase(Locale.ROOT).contains(query)) {
+                filteredApps.add(app);
             }
         }
         adapter.notifyDataSetChanged();
+        TextView empty = findViewById(R.id.empty);
+        if (!loading) empty.setText(R.string.no_apps);
+        empty.setVisibility(filteredApps.isEmpty() ? View.VISIBLE : View.GONE);
+        ((TextView) findViewById(R.id.app_count)).setText(getString(R.string.app_count,
+                filteredApps.size(), allowlist.size()));
     }
 
-    private void setAllChecked(boolean checked) {
-        allowlist = new HashSet<>();
-        // Apply to all apps, not just filtered ones
+    private void setVisibleChecked(boolean checked) {
+        Set<String> updated = new HashSet<>(allowlist);
+        for (AppListAdapter.AppEntry app : filteredApps) {
+            if (checked) updated.add(app.packageName); else updated.remove(app.packageName);
+        }
+        saveAllowlist(updated);
+    }
+
+    private void refreshSelection() {
         for (AppListAdapter.AppEntry app : allApps) {
-            app.checked = checked;
-            if (checked) {
-                allowlist.add(app.packageName);
-            }
+            app.checked = allowlist.contains(app.packageName);
         }
-        updateAllowlist();
-        if (adapter != null) {
-            adapter.notifyDataSetChanged();
-        }
+        allApps.sort((a, b) -> {
+            if (a.checked != b.checked) return a.checked ? -1 : 1;
+            if (a.containsFcm != b.containsFcm) return a.containsFcm ? -1 : 1;
+            int order = a.label.compareToIgnoreCase(b.label);
+            return order != 0 ? order : a.packageName.compareTo(b.packageName);
+        });
+        filterApps();
     }
 
-    private void toggleSystemApps() {
-        showSystemApps = !showSystemApps;
-        loadApps();
-        filterApps(searchView != null ? searchView.getQuery().toString() : "");
-        if (adapter != null) {
-            adapter.notifyDataSetChanged();
-        }
-    }
-
-    private void sortApps() {
-        allApps.sort(MainActivity::compareEntries);
-    }
-
-    /** Checked (allowlisted) apps first, then alphabetically by label. */
-    private static int compareEntries(AppListAdapter.AppEntry a, AppListAdapter.AppEntry b) {
-        if (a.checked != b.checked) {
-            return a.checked ? -1 : 1;
-        }
-        int c = a.label.compareToIgnoreCase(b.label);
-        return c != 0 ? c : a.packageName.compareTo(b.packageName);
-    }
-
-    private boolean isSystemApp(ApplicationInfo ai) {
-        // System app: either installed in /system or updated system app
-        return (ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0
-                && (ai.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) == 0;
-    }
-
-    /**
-     * Bind to the libxposed XposedService so we can read/write the cross-process
-     * remote preferences that the system_server hooks read from.
-     */
     private void initXposedService() {
         try {
             XposedServiceHelper.registerListener(new XposedServiceHelper.OnServiceListener() {
                 @Override
                 public void onServiceBind(@NonNull XposedService service) {
-                    xposedService = service;
                     runOnUiThread(() -> {
-                        reloadAllowlist();
-                        if (adapter != null) {
-                            adapter.notifyDataSetChanged();
+                        if (isDestroyed()) return;
+                        xposedService = service;
+                        SharedPreferences prefs = remotePrefs();
+                        if (prefs != null) {
+                            allowlist = Prefs.readAllowlist(prefs);
+                            ((TextView) findViewById(R.id.service_status)).setText(R.string.service_connected);
+                            refreshSelection();
                         }
                     });
                 }
 
                 @Override
                 public void onServiceDied(@NonNull XposedService service) {
-                    if (xposedService == service) {
+                    runOnUiThread(() -> {
+                        if (isDestroyed() || xposedService != service) return;
                         xposedService = null;
-                    }
+                        ((TextView) findViewById(R.id.service_status)).setText(R.string.service_unavailable);
+                    });
                 }
             });
-        } catch (Throwable e) {
-            // Xposed service unavailable; the UI just won't be able to persist.
+        } catch (RuntimeException e) {
+            // The initial status already explains that LSPosed is unavailable.
         }
     }
 
     private SharedPreferences remotePrefs() {
-        if (xposedService == null) {
-            return null;
-        }
+        if (xposedService == null) return null;
         try {
             return xposedService.getRemotePreferences(Prefs.GROUP_CONFIG);
-        } catch (Throwable e) {
+        } catch (RuntimeException e) {
             return null;
         }
     }
 
-    private void reloadAllowlist() {
+    private void saveAllowlist(Set<String> updated) {
         SharedPreferences prefs = remotePrefs();
         if (prefs == null) {
-            return;
+            Toast.makeText(this, R.string.service_unavailable, Toast.LENGTH_LONG).show();
+        } else {
+            try {
+                if (Prefs.writeAllowlist(this, prefs, updated)) {
+                    allowlist = updated;
+                } else {
+                    Toast.makeText(this, R.string.save_failed, Toast.LENGTH_LONG).show();
+                }
+            } catch (RuntimeException e) {
+                Toast.makeText(this, R.string.save_failed, Toast.LENGTH_LONG).show();
+            }
         }
-        allowlist = Prefs.readAllowlist(prefs);
-        for (AppListAdapter.AppEntry app : allApps) {
-            app.checked = allowlist.contains(app.packageName);
-        }
-        sortApps();
-        filterApps(searchView != null ? searchView.getQuery().toString() : "");
-    }
-
-    /** Persist the allowlist to remote prefs and tell system_server to refresh. */
-    private void updateAllowlist() {
-        SharedPreferences prefs = remotePrefs();
-        if (prefs == null) {
-            return;
-        }
-        Prefs.writeAllowlist(this, prefs, allowlist);
+        refreshSelection();
     }
 
     private void loadApps() {
-        // Query the package manager and load labels off the main thread so the
-        // first open of the screen stays responsive. Icons are loaded lazily by
-        // the adapter, so only the lightweight query/label work happens here.
-        final boolean showSys = showSystemApps;
-        final Set<String> allow = new HashSet<>(allowlist);
-        new Thread(() -> {
-            PackageManager pm = getPackageManager();
-
-            // Phase 1: show the allowlisted apps immediately, resolved from the
-            // allowlist package names, so the user sees their selection without
-            // waiting for the full package query to finish.
-            java.util.List<AppListAdapter.AppEntry> selected = new ArrayList<>();
-            for (String pkg : allow) {
-                ApplicationInfo ai;
-                try {
-                    ai = pm.getApplicationInfo(pkg, 0);
-                } catch (PackageManager.NameNotFoundException e) {
-                    continue; // allowlisted app no longer installed
+        appLoader.execute(() -> {
+            List<AppListAdapter.AppEntry> result = new ArrayList<>();
+            try {
+                PackageManager pm = getPackageManager();
+                FcmDetector detector = new FcmDetector(pm);
+                for (PackageInfo info : pm.getInstalledPackages(FcmDetector.PACKAGE_FLAGS)) {
+                    if (Thread.currentThread().isInterrupted()) return;
+                    ApplicationInfo ai = info.applicationInfo;
+                    if (ai == null || info.packageName.equals(getPackageName())) continue;
+                    AppListAdapter.AppEntry app = new AppListAdapter.AppEntry(info.packageName,
+                            ai.loadLabel(pm).toString(), detector.containsFcm(info));
+                    app.systemApp = (ai.flags & (ApplicationInfo.FLAG_SYSTEM
+                            | ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0;
+                    result.add(app);
                 }
-                AppListAdapter.AppEntry entry =
-                        new AppListAdapter.AppEntry(pkg, ai.loadLabel(pm).toString());
-                entry.checked = true;
-                selected.add(entry);
-            }
-            selected.sort(MainActivity::compareEntries);
-            if (!selected.isEmpty()) {
                 runOnUiThread(() -> {
+                    if (isDestroyed()) return;
+                    loading = false;
+                    findViewById(R.id.loading).setVisibility(View.GONE);
                     allApps.clear();
-                    allApps.addAll(selected);
-                    filterApps(searchView != null ? searchView.getQuery().toString() : "");
-                    adapter.notifyDataSetChanged();
+                    allApps.addAll(result);
+                    // Read the latest selection only on the main thread.
+                    refreshSelection();
+                });
+            } catch (RuntimeException e) {
+                runOnUiThread(() -> {
+                    if (isDestroyed()) return;
+                    findViewById(R.id.loading).setVisibility(View.GONE);
+                    ((TextView) findViewById(R.id.empty)).setText(R.string.load_failed);
                 });
             }
-
-            // Phase 2: full query, replacing with the complete sorted list.
-            java.util.List<android.content.pm.PackageInfo> installed =
-                    pm.getInstalledPackages(0);
-            java.util.List<AppListAdapter.AppEntry> result = new ArrayList<>();
-            for (android.content.pm.PackageInfo pi : installed) {
-                ApplicationInfo ai = pi.applicationInfo;
-                // Skip the module's own package (it's never FCM-targeted by GMS).
-                if (ai.packageName.equals(getPackageName())) {
-                    continue;
-                }
-                // By default, only show user apps. Toggle to show system apps.
-                if (!showSys && isSystemApp(ai)) {
-                    continue;
-                }
-                result.add(new AppListAdapter.AppEntry(
-                        ai.packageName, ai.loadLabel(pm).toString()));
-            }
-            for (AppListAdapter.AppEntry app : result) {
-                app.checked = allowlist.contains(app.packageName);
-            }
-            result.sort(MainActivity::compareEntries);
-            runOnUiThread(() -> {
-                allApps.clear();
-                allApps.addAll(result);
-                filterApps(searchView != null ? searchView.getQuery().toString() : "");
-                adapter.notifyDataSetChanged();
-            });
-        }).start();
+        });
     }
 }

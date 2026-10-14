@@ -36,9 +36,12 @@ public final class Prefs {
         return set != null ? new HashSet<>(set) : new HashSet<>();
     }
 
-    public static void writeAllowlist(Context context, SharedPreferences remotePrefs,
+    public static boolean writeAllowlist(Context context, SharedPreferences remotePrefs,
                                       Set<String> allowlist) {
-        remotePrefs.edit().putStringSet(KEY_ALLOWLIST, new HashSet<>(allowlist)).commit();
+        if (!remotePrefs.edit().putStringSet(KEY_ALLOWLIST, new HashSet<>(allowlist)).commit()) {
+            return false;
+        }
         context.sendBroadcast(new Intent(ACTION_ALLOWLIST_CHANGED));
+        return true;
     }
 }
