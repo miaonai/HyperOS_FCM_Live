@@ -2,13 +2,13 @@
 <resources>
     <string name="app_name">Hyper FCM Live</string>
     <string name="xposed_description">解除国行 HyperOS 对 FCM 连接广播及所选应用唤醒的限制。启用后耗电可能增加。</string>
-    <string name="select_all">全选包含 FCM 的应用</string>
+    <string name="select_all">全选 FCM 应用</string>
     <string name="clear_all">清除所有选择</string>
     <string name="search_hint">搜索应用名或包名…</string>
     <string name="more_options">更多选项</string>
     <string name="show_system_apps">显示系统应用</string>
-    <string name="show_fcm_only">仅显示包含 FCM 的应用</string>
-    <string name="auto_fcm">自动放行包含 FCM 的应用</string>
+    <string name="show_fcm_only">仅显示 FCM 应用</string>
+    <string name="auto_fcm">自动放行 FCM 应用</string>
     <string name="contains_fcm">包含 FCM</string>
     <string name="allow_wake_app">允许 FCM 唤醒%1$s</string>
     <string name="auto_allowed_app">%1$s，已自动放行。如需修改，请在更多选项中关闭自动放行。</string>

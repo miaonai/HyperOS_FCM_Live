@@ -11,7 +11,7 @@ import android.graphics.Canvas;
 import android.os.Looper;
 import android.view.View;
 import android.widget.SearchView;
-import android.widget.Switch;
+import android.widget.CompoundButton;
 
 import org.junit.After;
 import org.junit.Before;
@@ -106,7 +106,7 @@ public class ManagementUiTest {
         field("xposedService").set(activity, null);
         AppListAdapter adapter = (AppListAdapter) field("adapter").get(activity);
         View row = adapter.getView(0, null, activity.findViewById(R.id.app_list));
-        ((Switch) row.findViewById(R.id.app_check)).performClick();
+        ((CompoundButton) row.findViewById(R.id.app_check)).performClick();
         assertFalse(apps().get(0).checked);
         assertTrue(Prefs.readAllowlist(prefs).isEmpty());
         assertEquals(activity.getString(R.string.service_unavailable), ShadowToast.getTextOfLatestToast());
@@ -117,7 +117,7 @@ public class ManagementUiTest {
         assertTrue(apps().get(0).automaticallyAllowed);
         AppListAdapter adapter = (AppListAdapter) field("adapter").get(activity);
         View row = adapter.getView(0, null, activity.findViewById(R.id.app_list));
-        Switch toggle = row.findViewById(R.id.app_check);
+        CompoundButton toggle = row.findViewById(R.id.app_check);
         assertTrue(toggle.isChecked());
         assertFalse(toggle.isEnabled());
         prefs.edit().putBoolean(Prefs.KEY_AUTO_FCM, false).commit();
@@ -138,9 +138,49 @@ public class ManagementUiTest {
         assertEquals(View.VISIBLE, activity.findViewById(R.id.title).getVisibility());
     }
 
+    @Test public void enabledAppsComeFirstAfterLoadToggleAndAutomaticPolicyChanges() throws Exception {
+        prefs.edit().putStringSet(Prefs.KEY_ALLOWLIST, Set.of("com.example.notes")).commit();
+        invoke("readPolicy");
+        AppListAdapter adapter = (AppListAdapter) field("adapter").get(activity);
+        assertEquals("com.example.notes", adapter.getItem(0).packageName);
+        View row = adapter.getView(2, null, activity.findViewById(R.id.app_list));
+        assertEquals("com.example.mail", adapter.getItem(2).packageName);
+        row.findViewById(R.id.app_check).performClick();
+        assertTrue(Prefs.readAllowlist(prefs).contains("com.example.mail"));
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(400));
+        assertEquals("com.example.mail", adapter.getItem(0).packageName);
+        assertEquals("com.example.notes", adapter.getItem(1).packageName);
+        assertFalse(adapter.getItem(2).checked);
+        prefs.edit().putBoolean(Prefs.KEY_AUTO_FCM, true).commit();
+        invoke("readPolicy");
+        assertEquals("org.telegram.messenger", adapter.getItem(0).packageName);
+        assertTrue(adapter.getItem(0).automaticallyAllowed);
+        invoke("confirmClearAll");
+        ShadowAlertDialog.getLatestAlertDialog().getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+        assertEquals("org.telegram.messenger", adapter.getItem(0).packageName);
+        for (int i = 0; i < adapter.getCount(); i++) assertFalse(adapter.getItem(i).checked);
+    }
+
+    @Test public void reusedRowsSnapToTheirOwnSwitchState() throws Exception {
+        prefs.edit().putStringSet(Prefs.KEY_ALLOWLIST, Set.of("org.telegram.messenger")).commit();
+        invoke("readPolicy");
+        AppListAdapter adapter = (AppListAdapter) field("adapter").get(activity);
+        View row = adapter.getView(0, null, activity.findViewById(R.id.app_list));
+        assertTrue(((CompoundButton) row.findViewById(R.id.app_check)).isChecked());
+        row = adapter.getView(1, row, activity.findViewById(R.id.app_list));
+        assertFalse(((CompoundButton) row.findViewById(R.id.app_check)).isChecked());
+        Field position = CapsuleSwitch.class.getDeclaredField("position");
+        position.setAccessible(true);
+        assertEquals(0f, position.getFloat(row.findViewById(R.id.app_check)), 0f);
+        row = adapter.getView(0, row, activity.findViewById(R.id.app_list));
+        assertEquals(1f, position.getFloat(row.findViewById(R.id.app_check)), 0f);
+    }
+
     @Test public void menuFiltersPersistAndDoNotChangePolicy() throws Exception {
         activity.findViewById(R.id.more).performClick();
         View menu = Shadows.shadowOf(activity.getApplication()).getLatestPopupWindow().getContentView();
+        assertTrue("Menu should wrap content instead of filling 344dp",
+                Shadows.shadowOf(activity.getApplication()).getLatestPopupWindow().getWidth() < 260);
         int[] ids = { R.id.menu_fcm_only, R.id.menu_system_apps, R.id.menu_clear_all,
                 R.id.menu_select_fcm, R.id.menu_auto_fcm, R.id.menu_diagnostics, R.id.menu_about };
         for (int id : ids) assertNotNull(menu.findViewById(id));
@@ -189,10 +229,12 @@ public class ManagementUiTest {
                 .findViewById(R.id.menu_fcm_only).performClick();
         activity.findViewById(R.id.more).performClick();
         Shadows.shadowOf(Looper.getMainLooper()).idle();
-        View menu = Shadows.shadowOf(activity.getApplication()).getLatestPopupWindow().getContentView().getRootView();
-        menu.measure(View.MeasureSpec.makeMeasureSpec(344, View.MeasureSpec.EXACTLY),
+        android.widget.PopupWindow popup = Shadows.shadowOf(activity.getApplication()).getLatestPopupWindow();
+        View menu = popup.getContentView();
+        int width = popup.getWidth();
+        menu.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(640, View.MeasureSpec.AT_MOST));
-        saveRender(menu, 344, menu.getMeasuredHeight(), "management-menu.png");
+        saveRender(menu, width, menu.getMeasuredHeight(), "management-menu.png");
     }
 
     @Test
@@ -212,6 +254,9 @@ public class ManagementUiTest {
                 View.MeasureSpec.makeMeasureSpec(892, View.MeasureSpec.EXACTLY));
         root.layout(0, 0, 412, 892);
         android.widget.ListView list = activity.findViewById(R.id.app_list);
+        for (int i = 0; i < list.getChildCount(); i++) {
+            list.getChildAt(i).findViewById(R.id.app_check).jumpDrawablesToCurrentState();
+        }
         FcmLabelView label = list.getChildAt(0).findViewById(R.id.app_label);
         assertTrue("FCM name must have a visible line", label.getHeight() >= label.getTextSize());
         assertTrue(label.getText().toString().contains("Telegram"));

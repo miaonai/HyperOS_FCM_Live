@@ -75,7 +75,8 @@ final class ManagementMenu {
         title.setTextSize(14);
         title.setTextColor(context.getColor(R.color.text_primary));
         title.setPadding(0, 0, dp(12), 0);
-        row.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        row.addView(title, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         row.setEnabled(enabled);
         row.setAlpha(enabled ? 1 : 0.4f);
         row.setFocusable(true);
@@ -86,7 +87,10 @@ final class ManagementMenu {
     }
 
     void show(View anchor) {
-        int width = Math.min(dp(344), anchor.getRootView().getWidth() - dp(32));
+        int availableWidth = Math.max(1, anchor.getRootView().getWidth() - dp(32));
+        items.measure(View.MeasureSpec.makeMeasureSpec(availableWidth, View.MeasureSpec.AT_MOST),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+        int width = items.getMeasuredWidth();
         items.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
         popup.setWidth(width);

@@ -9,7 +9,6 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
-import android.widget.Switch;
 import android.widget.ImageView;
 import android.widget.TextView;
 
@@ -95,6 +94,10 @@ public class AppListAdapter extends BaseAdapter {
         }
         holder.check.setOnCheckedChangeListener(null);
         holder.check.setChecked(app.checked);
+        if (!app.packageName.equals(holder.boundPackage)) {
+            holder.check.jumpDrawablesToCurrentState();
+        }
+        holder.boundPackage = app.packageName;
         holder.check.setEnabled(!app.automaticallyAllowed);
         holder.check.setAlpha(app.automaticallyAllowed ? 0.55f : 1f);
         holder.check.setContentDescription(inflater.getContext().getString(
@@ -148,6 +151,7 @@ public class AppListAdapter extends BaseAdapter {
         ImageView icon;
         FcmLabelView label;
         TextView pkg;
-        Switch check;
+        CapsuleSwitch check;
+        String boundPackage;
     }
 }

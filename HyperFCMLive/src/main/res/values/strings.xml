@@ -6,7 +6,7 @@
     <string name="search_hint">App name or package…</string>
     <string name="more_options">More options</string>
     <string name="show_system_apps">Show system apps</string>
-    <string name="show_fcm_only">Only show apps containing FCM</string>
+    <string name="show_fcm_only">Only show FCM apps</string>
     <string name="auto_fcm">Automatically allow FCM apps</string>
     <string name="contains_fcm">Contains FCM</string>
     <string name="allow_wake_app">Allow FCM to wake %1$s</string>

@@ -59,6 +59,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     private XposedService xposedService;
     private ManagementMenu menu;
     private OnBackInvokedCallback searchBackCallback;
+    private final Runnable reorderApps = this::filterApps;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -72,7 +73,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         adapter = new AppListAdapter(this, filteredApps, (pkg, checked) -> {
             Set<String> updated = new HashSet<>(allowlist);
             if (checked) updated.add(pkg); else updated.remove(pkg);
-            savePolicy(updated, autoFcm);
+            savePolicy(updated, autoFcm, true);
         });
         ListView list = findViewById(R.id.app_list);
         list.setAdapter(adapter);
@@ -214,6 +215,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
 
     @Override
     protected void onDestroy() {
+        findViewById(R.id.root).removeCallbacks(reorderApps);
         if (menu != null) menu.dismiss();
         if (Build.VERSION.SDK_INT >= 33 && searchBackCallback != null) {
             getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(searchBackCallback);
@@ -312,6 +314,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     }
 
     private void filterApps() {
+        findViewById(R.id.root).removeCallbacks(reorderApps);
         String query = searchView.getQuery().toString().trim().toLowerCase(Locale.ROOT);
         filteredApps.clear();
         for (AppListAdapter.AppEntry app : allApps) {
@@ -320,6 +323,8 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
             if (app.label.toLowerCase(Locale.ROOT).contains(query)
                     || app.packageName.toLowerCase(Locale.ROOT).contains(query)) filteredApps.add(app);
         }
+        // Stable sort preserves FCM/name order within each enabled/disabled group.
+        filteredApps.sort((a, b) -> Boolean.compare(b.checked, a.checked));
         adapter.notifyDataSetChanged();
         TextView empty = findViewById(R.id.empty);
         empty.setText(loadFailed ? R.string.load_failed : loading ? R.string.loading_apps : R.string.no_apps);
@@ -329,6 +334,10 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     }
 
     private void refreshSelection() {
+        refreshSelection(false);
+    }
+
+    private void refreshSelection(boolean deferReorder) {
         Set<String> detected = new HashSet<>();
         for (AppListAdapter.AppEntry app : allApps) {
             if (app.containsFcm) detected.add(app.packageName);
@@ -338,8 +347,13 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
             app.automaticallyAllowed = autoFcm && app.containsFcm;
             app.checked = effective.contains(app.packageName);
         }
-        // Keep rows stationary while switching, including when a save fails.
-        filterApps();
+        if (deferReorder) {
+            // Let the clicked thumb finish moving before moving its row to a different group.
+            adapter.notifyDataSetChanged();
+            View root = findViewById(R.id.root);
+            root.removeCallbacks(reorderApps);
+            root.postDelayed(reorderApps, CapsuleSwitch.SETTLE_DURATION_MS);
+        } else filterApps();
     }
 
     private void readPolicy() {
@@ -382,6 +396,10 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     }
 
     private void savePolicy(Set<String> updated, boolean automatic) {
+        savePolicy(updated, automatic, false);
+    }
+
+    private void savePolicy(Set<String> updated, boolean automatic, boolean deferReorder) {
         SharedPreferences prefs = remotePrefs();
         if (prefs == null) {
             Toast.makeText(this, R.string.service_unavailable, Toast.LENGTH_LONG).show();
@@ -395,7 +413,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                 Toast.makeText(this, R.string.save_failed, Toast.LENGTH_LONG).show();
             }
         }
-        refreshSelection();
+        refreshSelection(deferReorder);
     }
 
     private void loadApps() {
