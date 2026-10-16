@@ -157,6 +157,7 @@ public class ManagementUiTest {
         assertTrue(adapter.getItem(0).automaticallyAllowed);
         invoke("confirmClearAll");
         ShadowAlertDialog.getLatestAlertDialog().getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+        Shadows.shadowOf(Looper.getMainLooper()).idle();
         assertEquals("org.telegram.messenger", adapter.getItem(0).packageName);
         for (int i = 0; i < adapter.getCount(); i++) assertFalse(adapter.getItem(i).checked);
     }
@@ -230,7 +231,7 @@ public class ManagementUiTest {
         activity.findViewById(R.id.more).performClick();
         Shadows.shadowOf(Looper.getMainLooper()).idle();
         android.widget.PopupWindow popup = Shadows.shadowOf(activity.getApplication()).getLatestPopupWindow();
-        View menu = popup.getContentView();
+        View menu = popup.getContentView().getRootView();
         int width = popup.getWidth();
         menu.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(640, View.MeasureSpec.AT_MOST));
