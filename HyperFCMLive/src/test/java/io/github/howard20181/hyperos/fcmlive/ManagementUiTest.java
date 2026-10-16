@@ -147,7 +147,6 @@ public class ManagementUiTest {
         assertEquals("com.example.mail", adapter.getItem(2).packageName);
         row.findViewById(R.id.app_check).performClick();
         assertTrue(Prefs.readAllowlist(prefs).contains("com.example.mail"));
-        Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(400));
         assertEquals("com.example.mail", adapter.getItem(0).packageName);
         assertEquals("com.example.notes", adapter.getItem(1).packageName);
         assertFalse(adapter.getItem(2).checked);
@@ -160,6 +159,25 @@ public class ManagementUiTest {
         Shadows.shadowOf(Looper.getMainLooper()).idle();
         assertEquals("org.telegram.messenger", adapter.getItem(0).packageName);
         for (int i = 0; i < adapter.getCount(); i++) assertFalse(adapter.getItem(i).checked);
+    }
+
+    @Test public void applicationIdentitySurvivesSorting() throws Exception {
+        AppListAdapter adapter = (AppListAdapter) field("adapter").get(activity);
+        long notesId = adapter.getItemId(2);
+        prefs.edit().putStringSet(Prefs.KEY_ALLOWLIST, Set.of("com.example.notes")).commit();
+        invoke("readPolicy");
+        assertEquals("com.example.notes", adapter.getItem(0).packageName);
+        assertEquals(notesId, adapter.getItemId(0));
+        assertTrue(adapter.hasStableIds());
+    }
+
+    @Test public void aboutWindowHasNoDimOrBackgroundBlur() throws Exception {
+        invoke("showAbout");
+        AlertDialog dialog = ShadowAlertDialog.getLatestAlertDialog();
+        android.view.WindowManager.LayoutParams attributes = dialog.getWindow().getAttributes();
+        assertEquals(0, attributes.flags & android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+        assertEquals(0f, attributes.dimAmount, 0f);
+        assertEquals(0, attributes.getBlurBehindRadius());
     }
 
     @Test public void reusedRowsSnapToTheirOwnSwitchState() throws Exception {
