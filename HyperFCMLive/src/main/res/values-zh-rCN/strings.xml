@@ -2,18 +2,30 @@
 <resources>
     <string name="app_name">Hyper FCM Live</string>
     <string name="xposed_description">解除国行 HyperOS 对 FCM 连接广播及所选应用唤醒的限制。启用后耗电可能增加。</string>
-    <string name="select_all">全选当前列表</string>
-    <string name="clear_all">清除当前选择</string>
+    <string name="select_all">全选包含 FCM 的应用</string>
+    <string name="clear_all">清除所有选择</string>
     <string name="search_hint">搜索应用名或包名…</string>
+    <string name="more_options">更多选项</string>
     <string name="show_system_apps">显示系统应用</string>
-    <string name="show_fcm_only">仅显示 FCM</string>
+    <string name="show_fcm_only">仅显示包含 FCM 的应用</string>
+    <string name="auto_fcm">自动放行包含 FCM 的应用</string>
     <string name="contains_fcm">包含 FCM</string>
-    <string name="fcm_not_detected">未检测到 FCM</string>
     <string name="allow_wake_app">允许 FCM 唤醒%1$s</string>
-    <string name="app_count">显示 %1$d 个 · 白名单共 %2$d 个</string>
+    <string name="auto_allowed_app">%1$s，已自动放行。如需修改，请在更多选项中关闭自动放行。</string>
+    <string name="auto_fcm_managed">如需修改此开关，请在右上角菜单中关闭自动放行。</string>
     <string name="loading_apps">正在检测已安装应用…</string>
-    <string name="no_apps">没有匹配的应用，请检查筛选条件和应用列表权限。</string>
+    <string name="no_apps">没有匹配的应用，请调整搜索或筛选条件。</string>
     <string name="load_failed">无法读取应用，请检查应用列表权限后重新打开。</string>
     <string name="service_unavailable">未连接 LSPosed，请启用模块后重新打开以保存选择。</string>
     <string name="save_failed">保存失败，已恢复原有选择。</string>
+    <string name="confirm_clear">清除全部手动选择，并关闭自动放行？此操作也会清除被搜索或筛选隐藏的应用选择。</string>
+    <plurals name="confirm_select_fcm">
+        <item quantity="other">放行全部 %1$d 个已检测到包含 FCM 的应用？包括系统应用和被搜索或筛选隐藏的应用，其他手动选择会保留。</item>
+    </plurals>
+    <string name="no_fcm_apps">未检测到包含 FCM 的应用。</string>
+    <string name="open_diagnostics">打开 FCM Diagnostics</string>
+    <string name="diagnostics_unavailable">无法打开 FCM Diagnostics，请检查 Google Play 服务是否已安装并启用。</string>
+    <string name="about">关于</string>
+    <string name="about_message">版本 %1$s\n\n管理国行 HyperOS 上允许 FCM 唤醒的应用。\n\n“包含 FCM”表示检测到 FCM 组件，不代表已注册或推送一定可达。自动放行也适用于后来安装的 FCM 应用，关闭后恢复手动选择。\n\n需要 LSPosed，修改会自动保存。\n\n界面参考 XiaoTong6666/Sui 的 MIUIX 风格。</string>
+    <string name="version_unknown">未知</string>
 </resources>

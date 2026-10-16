@@ -9,7 +9,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
-import android.widget.CheckBox;
+import android.widget.Switch;
 import android.widget.ImageView;
 import android.widget.TextView;
 
@@ -29,6 +29,7 @@ public class AppListAdapter extends BaseAdapter {
         public Drawable icon;   // loaded lazily, null until resolved
         public volatile boolean iconLoading;
         public boolean checked;
+        public boolean automaticallyAllowed;
         public boolean systemApp;
         public final boolean containsFcm;
 
@@ -77,20 +78,14 @@ public class AppListAdapter extends BaseAdapter {
             holder.icon = convertView.findViewById(R.id.app_icon);
             holder.label = convertView.findViewById(R.id.app_label);
             holder.pkg = convertView.findViewById(R.id.app_pkg);
-            holder.fcm = convertView.findViewById(R.id.app_fcm);
             holder.check = convertView.findViewById(R.id.app_check);
             convertView.setTag(holder);
         } else {
             holder = (ViewHolder) convertView.getTag();
         }
         AppEntry app = getItem(position);
-        holder.label.setText(app.label);
+        holder.label.setAppName(app.label, app.containsFcm);
         holder.pkg.setText(app.packageName);
-        holder.fcm.setText(app.containsFcm ? R.string.contains_fcm : R.string.fcm_not_detected);
-        holder.fcm.setTextColor(inflater.getContext().getColor(
-                app.containsFcm ? R.color.fcm_text : R.color.text_secondary));
-        holder.fcm.setBackgroundResource(app.containsFcm
-                ? R.drawable.bg_fcm_badge : R.drawable.bg_neutral_badge);
         if (app.icon != null) {
             holder.icon.setImageDrawable(app.icon);
         } else {
@@ -100,15 +95,24 @@ public class AppListAdapter extends BaseAdapter {
         }
         holder.check.setOnCheckedChangeListener(null);
         holder.check.setChecked(app.checked);
+        holder.check.setEnabled(!app.automaticallyAllowed);
+        holder.check.setAlpha(app.automaticallyAllowed ? 0.55f : 1f);
         holder.check.setContentDescription(inflater.getContext().getString(
-                R.string.allow_wake_app, app.label));
+                app.automaticallyAllowed ? R.string.auto_allowed_app : R.string.allow_wake_app, app.label));
         holder.check.setOnCheckedChangeListener((buttonView, isChecked) -> {
             app.checked = isChecked;
             if (listener != null) {
                 listener.onCheckedChanged(app.packageName, isChecked);
             }
         });
-        convertView.setOnClickListener(v -> holder.check.performClick());
+        convertView.setOnClickListener(v -> {
+            if (app.automaticallyAllowed) {
+                android.widget.Toast.makeText(inflater.getContext(), R.string.auto_fcm_managed,
+                        android.widget.Toast.LENGTH_SHORT).show();
+            } else {
+                holder.check.performClick();
+            }
+        });
         return convertView;
     }
 
@@ -142,9 +146,8 @@ public class AppListAdapter extends BaseAdapter {
 
     private static class ViewHolder {
         ImageView icon;
-        TextView label;
+        FcmLabelView label;
         TextView pkg;
-        TextView fcm;
-        CheckBox check;
+        Switch check;
     }
 }

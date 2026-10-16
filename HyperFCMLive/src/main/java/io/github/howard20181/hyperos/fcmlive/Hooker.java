@@ -25,6 +25,13 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import io.github.libxposed.api.XposedModule;
 
@@ -35,9 +42,91 @@ public class Hooker extends XposedModule {
     private static final String ACTION_REMOTE_INTENT = "com.google.android.c2dm.intent.RECEIVE";
     private static final String GMS_PACKAGE_NAME = "com.google.android.gms";
     private static final String GMS_PERSISTENT_PROCESS_NAME = "com.google.android.gms.persistent";
+    private static final long[] FCM_SCAN_RETRY_SECONDS = {1, 2, 4, 8, 16, 32};
+    private static final long[] RECEIVER_INIT_RETRY_SECONDS = {2, 4, 8, 16, 30, 30};
     private Pair<String, ClassLoader> param;
     private final Set<String> hookedIds = new HashSet<>();
-    private Context systemContext;
+    private volatile Context systemContext;
+    private ScheduledExecutorService fcmPackageScanner = newFcmPackageScanner();
+    private ScheduledExecutorService policyReceiverInitializer = newPolicyReceiverInitializer();
+    private final AtomicBoolean policyReceiverInitStarted = new AtomicBoolean();
+    private final AtomicBoolean fcmScanQueued = new AtomicBoolean();
+    private final AtomicBoolean fcmScanRequested = new AtomicBoolean();
+    private final AtomicInteger fcmScanRetryCount = new AtomicInteger();
+    private final AtomicLong fcmScanRetryEpoch = new AtomicLong();
+    private final Object fcmScanRetryLock = new Object();
+    private ScheduledFuture<?> fcmScanRetryFuture;
+    private volatile long fcmScannerGeneration;
+
+    private static ScheduledExecutorService newFcmPackageScanner() {
+        return Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread thread = new Thread(r, "HyperFCM-FcmPolicy");
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
+
+    private static ScheduledExecutorService newPolicyReceiverInitializer() {
+        return Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread thread = new Thread(r, "HyperFCM-PolicyReceivers");
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
+
+    private synchronized void ensurePolicyLifecycleExecutors() {
+        if (fcmPackageScanner == null || fcmPackageScanner.isShutdown()) {
+            fcmPackageScanner = newFcmPackageScanner();
+        }
+        if (policyReceiverInitializer == null || policyReceiverInitializer.isShutdown()) {
+            policyReceiverInitializer = newPolicyReceiverInitializer();
+        }
+    }
+
+    private synchronized void cleanupPolicyLifecycle() {
+        Context context = systemContext;
+        unregisterReceiver(context, policyReceiver);
+        unregisterReceiver(context, packageReceiver);
+        policyReceiver = null;
+        packageReceiver = null;
+        allowlistReceiverRegistered = false;
+        packageReceiverRegistered = false;
+        policyReceiverInitStarted.set(false);
+        synchronized (fcmScanRetryLock) {
+            fcmScannerGeneration++;
+            fcmScanRetryEpoch.incrementAndGet();
+            fcmScanRetryCount.set(0);
+            cancelFcmScanRetryLocked();
+        }
+        fcmScanRequested.set(false);
+        fcmScanQueued.set(false);
+        if (policyReceiverInitializer != null) {
+            policyReceiverInitializer.shutdownNow();
+        }
+        if (fcmPackageScanner != null) {
+            fcmPackageScanner.shutdownNow();
+        }
+    }
+
+    private void cancelFcmScanRetryLocked() {
+        if (fcmScanRetryFuture != null) {
+            fcmScanRetryFuture.cancel(false);
+            fcmScanRetryFuture = null;
+        }
+    }
+
+    private static void unregisterReceiver(Context context, BroadcastReceiver receiver) {
+        if (context == null || receiver == null) {
+            return;
+        }
+        try {
+            context.unregisterReceiver(receiver);
+        } catch (IllegalArgumentException ignored) {
+            // Registration may have failed before hot reload began.
+        } catch (RuntimeException e) {
+            Log.e(TAG, "Failed to unregister policy receiver during hot reload", e);
+        }
+    }
 
     private HookBuilder hookE(Executable executable) {
         var builder = hook(executable);
@@ -153,6 +242,7 @@ public class Hooker extends XposedModule {
         // Hot reload of system_server hooks is unreliable; a full reboot is the
         // supported path. We still support reload below, but advise rebooting.
         log(Log.WARN, TAG, "Hot reload requested — a full reboot is recommended for reliability");
+        cleanupPolicyLifecycle();
         param.setSavedInstanceState(this.param);
         return true;
     }
@@ -160,6 +250,7 @@ public class Hooker extends XposedModule {
     @Override
     public void onHotReloaded(@NonNull HotReloadedParam param) {
         UnsafeUtils.INSTANCE.setXposedModule(this);
+        ensurePolicyLifecycleExecutors();
         // Clean reload: reset id bookkeeping and remove every previous hook so the
         // re-setup below starts fresh. Without this, old handles were never unhooked
         // (hookedIds accumulated across passes) and stacked duplicate hooks made the
@@ -352,7 +443,7 @@ public class Hooker extends XposedModule {
                         && GMS_PACKAGE_NAME.equals(callerPackage) // BroadcastRecord.callerPackage nullable
                         && intentField.get(broadcastRecord) instanceof Intent intent
                         && ACTION_REMOTE_INTENT.equals(intent.getAction())
-                        // Auto-start only apps the user whitelisted; empty list = all.
+                        // Auto-start only apps allowed by the manual or automatic FCM policy.
                         && intent.getPackage() instanceof String targetPackage
                         && shouldWake(targetPackage)) {
                     return true;
@@ -461,95 +552,311 @@ public class Hooker extends XposedModule {
         return powerExemptionManager;
     }
 
-    /**
-     * A Context in system_server (ActivityThread.currentApplication()).
-     */
+    /** A Context owned by the system-server ActivityThread. */
     private Context getSystemContext() {
         if (systemContext == null) {
+            Class<?> activityThreadClass = null;
             try {
-                // ActivityThread.currentApplication() is hidden; call via reflection.
-                Class<?> activityThreadClass = Class.forName("android.app.ActivityThread");
+                activityThreadClass = Class.forName("android.app.ActivityThread");
                 Method currentApplication = activityThreadClass.getMethod("currentApplication");
                 if (currentApplication.invoke(null) instanceof Context ctx) {
                     systemContext = ctx;
                 }
             } catch (Throwable ignored) {
             }
+            if (systemContext == null && activityThreadClass != null) {
+                try {
+                    Method currentActivityThread =
+                            activityThreadClass.getDeclaredMethod("currentActivityThread");
+                    currentActivityThread.setAccessible(true);
+                    Object activityThread = currentActivityThread.invoke(null);
+                    if (activityThread != null) {
+                        Method getSystemContext =
+                                activityThreadClass.getDeclaredMethod("getSystemContext");
+                        getSystemContext.setAccessible(true);
+                        if (getSystemContext.invoke(activityThread) instanceof Context ctx) {
+                            systemContext = ctx;
+                        }
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
         }
         return systemContext;
     }
 
-    /**
-     * Package names the user allows FCM to wake / auto-launch, kept in memory in
-     * system_server. Loaded from libxposed's cross-process remote preferences and
-     * refreshed whenever the app broadcasts {@link Prefs#ACTION_ALLOWLIST_CHANGED}.
-     */
-    private static volatile Set<String> sAllowlist = Collections.emptySet();
+    /** Manual and automatic portions of the policy are published as one snapshot. */
+    private static final class WakePolicy {
+        final Set<String> manualAllowlist;
+        final boolean autoFcm;
 
-    /** Re-read the allowlist from the shared remote preferences. */
-    private void loadAllowlistFromRemotePrefs() {
-        try {
-            Set<String> set = getRemotePreferences(Prefs.GROUP_CONFIG)
-                    .getStringSet(Prefs.KEY_ALLOWLIST, Collections.emptySet());
-            sAllowlist = set != null ? new HashSet<>(set) : new HashSet<>();
-        } catch (Exception e) {
-            log(Log.ERROR, TAG, "Failed to read remote allowlist", e);
+        WakePolicy(Set<String> manualAllowlist, boolean autoFcm) {
+            this.manualAllowlist = Collections.unmodifiableSet(new HashSet<>(manualAllowlist));
+            this.autoFcm = autoFcm;
         }
     }
 
-    /** Called from hookSystemServer: load the initial allowlist at boot. */
+    private static volatile WakePolicy sWakePolicy = new WakePolicy(Collections.emptySet(), false);
+    private static volatile Set<String> sDetectedFcmPackages = Collections.emptySet();
+    private static volatile boolean sFcmPackageCacheLoaded;
+
+    /** Re-read the complete policy from shared remote preferences. */
+    private void loadPolicyFromRemotePrefs() {
+        try {
+            var prefs = getRemotePreferences(Prefs.GROUP_CONFIG);
+            Set<String> set = prefs.getStringSet(Prefs.KEY_ALLOWLIST, Collections.emptySet());
+            WakePolicy previousPolicy = sWakePolicy;
+            WakePolicy policy = new WakePolicy(set != null ? set : Collections.emptySet(),
+                    prefs.getBoolean(Prefs.KEY_AUTO_FCM, false));
+            sWakePolicy = policy;
+            if (policy.autoFcm && (!previousPolicy.autoFcm || !sFcmPackageCacheLoaded)) {
+                requestFcmPackageScan();
+            }
+        } catch (Exception e) {
+            log(Log.ERROR, TAG, "Failed to read FCM wake policy", e);
+        }
+    }
+
+    /** Called from hookSystemServer: load the initial policy at boot. */
     private void hookAllowlist() {
-        loadAllowlistFromRemotePrefs();
+        loadPolicyFromRemotePrefs();
+        schedulePolicyReceiverInitialization();
     }
 
     private boolean allowlistReceiverRegistered = false;
+    private boolean packageReceiverRegistered = false;
+    private BroadcastReceiver policyReceiver;
+    private BroadcastReceiver packageReceiver;
 
-    private Set<String> getFcmAllowlist() {
-        // Lazily register the refresh receiver on first real use. It can't be done
-        // in onSystemServerStarting because IActivityManager is null during early
-        // SystemServer startup, so registerReceiver would NPE. By the time any C2DM
-        // broadcast reaches here the system is fully up.
-        ensureAllowlistReceiver();
-        return new HashSet<>(sAllowlist);
-    }
-
-    /**
-     * Whether a target package should be woken / auto-started by FCM.
-     * An empty allowlist keeps the legacy behaviour (wake everything); once the
-     * user checks at least one app it becomes whitelist mode (only checked apps).
-     */
     private boolean shouldWake(String targetPackage) {
-        Set<String> allowlist = getFcmAllowlist();
-        return allowlist.isEmpty() || allowlist.contains(targetPackage);
+        ensurePolicyReceivers();
+        WakePolicy policy = sWakePolicy;
+        return FcmPolicy.shouldWake(targetPackage, policy.manualAllowlist,
+                policy.autoFcm, sDetectedFcmPackages);
     }
 
-    /** Register the receiver that re-reads the allowlist when the app updates it. */
-    private void ensureAllowlistReceiver() {
-        if (allowlistReceiverRegistered) {
+    /** Register policy and package-change receivers after system_server is ready. */
+    private synchronized void ensurePolicyReceivers() {
+        Context sys = getSystemContext();
+        if (sys == null) {
+            return;
+        }
+        boolean refreshPolicy = !allowlistReceiverRegistered;
+        boolean packageReceiverWasRegistered = packageReceiverRegistered;
+        if (!allowlistReceiverRegistered) {
+            try {
+                policyReceiver = new BroadcastReceiver() {
+                    @Override
+                    public void onReceive(Context context, Intent intent) {
+                        if (Prefs.ACTION_ALLOWLIST_CHANGED.equals(intent.getAction())) {
+                            loadPolicyFromRemotePrefs();
+                        }
+                    }
+                };
+                IntentFilter filter = new IntentFilter(Prefs.ACTION_ALLOWLIST_CHANGED);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    sys.registerReceiver(policyReceiver, filter, Context.RECEIVER_EXPORTED);
+                } else {
+                    sys.registerReceiver(policyReceiver, filter);
+                }
+                allowlistReceiverRegistered = true;
+            } catch (Exception e) {
+                log(Log.ERROR, TAG, "Failed to register policy receiver", e);
+            }
+        }
+        if (!packageReceiverRegistered) {
+            try {
+                packageReceiver = new BroadcastReceiver() {
+                    @Override
+                    public void onReceive(Context context, Intent intent) {
+                        String action = intent.getAction();
+                        if (Intent.ACTION_PACKAGE_REMOVED.equals(action)
+                                && intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) {
+                            return;
+                        }
+                        if (sWakePolicy.autoFcm) {
+                            requestFcmPackageScan();
+                        }
+                    }
+                };
+                IntentFilter filter = new IntentFilter();
+                filter.addAction(Intent.ACTION_PACKAGE_ADDED);
+                filter.addAction(Intent.ACTION_PACKAGE_REPLACED);
+                filter.addAction(Intent.ACTION_PACKAGE_CHANGED);
+                filter.addAction(Intent.ACTION_PACKAGE_REMOVED);
+                filter.addAction(Intent.ACTION_PACKAGE_FULLY_REMOVED);
+                filter.addDataScheme("package");
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    sys.registerReceiver(packageReceiver, filter, Context.RECEIVER_EXPORTED);
+                } else {
+                    sys.registerReceiver(packageReceiver, filter);
+                }
+                packageReceiverRegistered = true;
+            } catch (Exception e) {
+                log(Log.ERROR, TAG, "Failed to register package receiver", e);
+            }
+        }
+        // The app may have changed its preferences before this lazy receiver was
+        // installed, so catch up from the latest committed policy once.
+        if (refreshPolicy) {
+            loadPolicyFromRemotePrefs();
+        }
+        if (!packageReceiverWasRegistered && packageReceiverRegistered && sWakePolicy.autoFcm
+                && !sFcmPackageCacheLoaded) {
+            requestFcmPackageScan();
+        }
+    }
+
+    /** Retry receiver setup off the startup thread until system_server is ready. */
+    private void schedulePolicyReceiverInitialization() {
+        if (!policyReceiverInitStarted.compareAndSet(false, true)) {
             return;
         }
         try {
-            Context sys = getSystemContext();
-            if (sys == null) {
-                return;
-            }
-            BroadcastReceiver receiver = new BroadcastReceiver() {
-                @Override
-                public void onReceive(Context context, Intent intent) {
-                    if (Prefs.ACTION_ALLOWLIST_CHANGED.equals(intent.getAction())) {
-                        loadAllowlistFromRemotePrefs();
+            policyReceiverInitializer.schedule(() -> attemptPolicyReceiverInitialization(0),
+                    2, TimeUnit.SECONDS);
+        } catch (RuntimeException e) {
+            policyReceiverInitStarted.set(false);
+            log(Log.ERROR, TAG, "Failed to schedule policy receiver initialization", e);
+        }
+    }
+
+    private void attemptPolicyReceiverInitialization(int retryIndex) {
+        ensurePolicyReceivers();
+        if (allowlistReceiverRegistered && packageReceiverRegistered) {
+            policyReceiverInitializer.shutdown();
+            return;
+        }
+        if (retryIndex >= RECEIVER_INIT_RETRY_SECONDS.length) {
+            log(Log.WARN, TAG, "Policy receiver setup did not complete during startup retry window");
+            policyReceiverInitializer.shutdown();
+            return;
+        }
+        try {
+            policyReceiverInitializer.schedule(
+                    () -> attemptPolicyReceiverInitialization(retryIndex + 1),
+                    RECEIVER_INIT_RETRY_SECONDS[retryIndex], TimeUnit.SECONDS);
+        } catch (RuntimeException e) {
+            policyReceiverInitStarted.set(false);
+            log(Log.ERROR, TAG, "Failed to retry policy receiver initialization", e);
+        }
+    }
+
+    /**
+     * Queue a coalesced package scan. PackageManager work stays off hook and
+     * broadcast threads; a second request during a scan causes one follow-up.
+     */
+    private void requestFcmPackageScan() {
+        synchronized (fcmScanRetryLock) {
+            cancelFcmScanRetryLocked();
+            fcmScanRetryCount.set(0);
+            fcmScanRetryEpoch.incrementAndGet();
+        }
+        queueFcmPackageScan(fcmScannerGeneration);
+    }
+
+    private void queueFcmPackageScan(long generation) {
+        fcmScanRequested.set(true);
+        if (!fcmScanQueued.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            fcmPackageScanner.execute(() -> {
+                try {
+                    while (generation == fcmScannerGeneration
+                            && fcmScanRequested.getAndSet(false)) {
+                        if (refreshDetectedFcmPackages(generation)) {
+                            synchronized (fcmScanRetryLock) {
+                                if (generation == fcmScannerGeneration) {
+                                    fcmScanRetryCount.set(0);
+                                    fcmScanRetryEpoch.incrementAndGet();
+                                    cancelFcmScanRetryLocked();
+                                }
+                            }
+                        } else {
+                            scheduleFcmPackageScanRetry(generation,
+                                    fcmScanRetryEpoch.get());
+                        }
+                    }
+                } finally {
+                    if (generation == fcmScannerGeneration) {
+                        fcmScanQueued.set(false);
+                        if (fcmScanRequested.get()) {
+                            queueFcmPackageScan(generation);
+                        }
                     }
                 }
-            };
-            IntentFilter filter = new IntentFilter(Prefs.ACTION_ALLOWLIST_CHANGED);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                sys.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED);
-            } else {
-                sys.registerReceiver(receiver, filter);
+            });
+        } catch (RuntimeException e) {
+            if (generation == fcmScannerGeneration) {
+                fcmScanQueued.set(false);
+                scheduleFcmPackageScanRetry(generation, fcmScanRetryEpoch.get());
             }
-            allowlistReceiverRegistered = true;
-        } catch (Exception e) {
-            log(Log.ERROR, TAG, "Failed to register allowlist receiver", e);
+            log(Log.ERROR, TAG, "Failed to queue FCM package scan", e);
+        }
+    }
+
+    private void scheduleFcmPackageScanRetry(long generation, long retryEpoch) {
+        synchronized (fcmScanRetryLock) {
+            if (generation != fcmScannerGeneration
+                    || retryEpoch != fcmScanRetryEpoch.get()
+                    || fcmScanRetryFuture != null) {
+                return;
+            }
+            int retryIndex = fcmScanRetryCount.getAndIncrement();
+            if (retryIndex >= FCM_SCAN_RETRY_SECONDS.length) {
+                log(Log.WARN, TAG, "FCM package scan retry limit reached; waiting for the next policy or package change");
+                return;
+            }
+            try {
+                final ScheduledFuture<?>[] futureHolder = new ScheduledFuture<?>[1];
+                ScheduledFuture<?> future = fcmPackageScanner.schedule(() -> {
+                    synchronized (fcmScanRetryLock) {
+                        if (fcmScanRetryFuture != futureHolder[0]) {
+                            return;
+                        }
+                        fcmScanRetryFuture = null;
+                        if (generation != fcmScannerGeneration
+                                || retryEpoch != fcmScanRetryEpoch.get()) {
+                            return;
+                        }
+                    }
+                    queueFcmPackageScan(generation);
+                }, FCM_SCAN_RETRY_SECONDS[retryIndex], TimeUnit.SECONDS);
+                futureHolder[0] = future;
+                fcmScanRetryFuture = future;
+            } catch (RuntimeException e) {
+                log(Log.ERROR, TAG, "Failed to schedule FCM package scan retry", e);
+            }
+        }
+    }
+
+    private boolean refreshDetectedFcmPackages(long generation) {
+        try {
+            Context sys = getSystemContext();
+            if (sys == null) {
+                return false;
+            }
+            android.content.pm.PackageManager pm = sys.getPackageManager();
+            FcmDetector detector = new FcmDetector(pm);
+            Set<String> detected = new HashSet<>();
+            for (android.content.pm.PackageInfo info : pm.getInstalledPackages(FcmDetector.PACKAGE_FLAGS)) {
+                if (info.packageName != null && !Prefs.MODULE_PKG.equals(info.packageName)
+                        && detector.containsFcm(info)) {
+                    detected.add(info.packageName);
+                }
+            }
+            synchronized (fcmScanRetryLock) {
+                if (generation != fcmScannerGeneration) {
+                    return false;
+                }
+                sDetectedFcmPackages = Collections.unmodifiableSet(detected);
+                sFcmPackageCacheLoaded = true;
+            }
+            return true;
+        } catch (RuntimeException e) {
+            log(Log.ERROR, TAG, "Failed to refresh detected FCM packages", e);
+            return false;
         }
     }
 
@@ -634,7 +941,7 @@ public class Hooker extends XposedModule {
                         && getInvoker(getRecordMethod).invoke(chain.getThisObject(), chain.getArg(0)) instanceof Object app
                         && infoField.get(app) instanceof ApplicationInfo info
                         && GMS_PACKAGE_NAME.equals(info.packageName)) {
-                    // Wake / auto-start only apps the user whitelisted; empty list = all.
+                    // Wake / auto-start only apps allowed by the manual or automatic FCM policy.
                     if (intent.getPackage() instanceof String targetPackage
                             && shouldWake(targetPackage)) {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S

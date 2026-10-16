@@ -81,7 +81,12 @@ jobs:
           : > "$verification"
           for apk in "${apks[@]}"; do
             printf 'APK: %s\n\n' "$apk" | tee -a "$verification"
-            "$build_tools/apksigner" verify --verbose --print-certs "$apk" 2>&1 | tee -a "$verification"
+            "$build_tools/apksigner" verify --verbose --print-certs "$apk" 2>&1 | tee "$RUNNER_TEMP/release-signature.txt" | tee -a "$verification"
+            # Keep updates compatible with the previously delivered beta2/beta3 APKs.
+            if ! grep -Fq 'certificate SHA-256 digest: 177a1693c799881d456da3008a7608d343b8048d623fa97486967db4f9baeeb7' "$RUNNER_TEMP/release-signature.txt"; then
+              echo "Release signing certificate does not match the existing installation." >&2
+              exit 1
+            fi
             "$build_tools/aapt" dump badging "$apk" > "$RUNNER_TEMP/release-badging.txt"
             if grep -Fxq 'application-debuggable' "$RUNNER_TEMP/release-badging.txt"; then
               cat "$RUNNER_TEMP/release-badging.txt" | tee -a "$verification"
@@ -101,6 +106,7 @@ jobs:
           path: |
             HyperFCMLive/build/reports/tests/
             HyperFCMLive/build/reports/lint-results-release.*
+            HyperFCMLive/build/reports/ui/
           if-no-files-found: warn
           retention-days: 30
 

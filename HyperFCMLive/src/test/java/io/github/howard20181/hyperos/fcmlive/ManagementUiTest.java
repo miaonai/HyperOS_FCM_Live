@@ -1,0 +1,264 @@
+package io.github.howard20181.hyperos.fcmlive;
+
+import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
+
+import android.app.AlertDialog;
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.os.Looper;
+import android.view.View;
+import android.widget.SearchView;
+import android.widget.Switch;
+
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.robolectric.Robolectric;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.Shadows;
+import org.robolectric.android.controller.ActivityController;
+import org.robolectric.annotation.Config;
+import org.robolectric.annotation.GraphicsMode;
+import org.robolectric.shadows.ShadowAlertDialog;
+import org.robolectric.shadows.ShadowToast;
+
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.util.List;
+import java.util.Set;
+
+import io.github.libxposed.service.XposedService;
+
+@RunWith(RobolectricTestRunner.class)
+@Config(sdk = 35, qualifiers = "zh-rCN-w412dp-h892dp-mdpi")
+public class ManagementUiTest {
+    private ActivityController<MainActivity> controller;
+    private MainActivity activity;
+    private SharedPreferences prefs;
+
+    @Before
+    public void setUp() throws Exception {
+        controller = Robolectric.buildActivity(MainActivity.class).create().start().resume().visible();
+        activity = controller.get();
+        // Drain the package loader before installing a deterministic list fixture.
+        for (int i = 0; i < 200 && (boolean) field("loading").get(activity); i++) {
+            Thread.sleep(10);
+            Shadows.shadowOf(Looper.getMainLooper()).idle();
+        }
+        assertFalse("Package loading completed", (boolean) field("loading").get(activity));
+        prefs = activity.getSharedPreferences("test_policy", Context.MODE_PRIVATE);
+        prefs.edit().clear().commit();
+        XposedService service = mock(XposedService.class);
+        when(service.getRemotePreferences(Prefs.GROUP_CONFIG)).thenReturn(prefs);
+        field("xposedService").set(activity, service);
+        List<AppListAdapter.AppEntry> apps = apps();
+        apps.clear();
+        apps.add(app("org.telegram.messenger", "Telegram", true, false));
+        apps.add(app("com.example.mail", "邮件", true, false));
+        apps.add(app("com.example.system", "系统推送服务", true, true));
+        apps.add(app("com.example.notes", "笔记", false, false));
+        invoke("readPolicy");
+    }
+
+    @After public void tearDown() { controller.pause().stop().destroy(); }
+
+    @Test public void selectAllIncludesHiddenSystemAppsAndPreservesManualChoices() throws Exception {
+        prefs.edit().putStringSet(Prefs.KEY_ALLOWLIST, Set.of("com.example.notes")).commit();
+        invoke("readPolicy");
+        ((SearchView) activity.findViewById(R.id.search_view)).setQuery("Telegram", false);
+        invoke("confirmSelectFcm");
+        AlertDialog dialog = ShadowAlertDialog.getLatestAlertDialog();
+        assertEquals(Set.of("com.example.notes"), Prefs.readAllowlist(prefs));
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+        Shadows.shadowOf(Looper.getMainLooper()).idle();
+        assertEquals(Set.of("org.telegram.messenger", "com.example.mail", "com.example.system",
+                "com.example.notes"), Prefs.readAllowlist(prefs));
+    }
+
+    @Test public void cancelClearPreservesBothManualAndAutomaticPolicy() throws Exception {
+        seedPolicy();
+        invoke("confirmClearAll");
+        ShadowAlertDialog.getLatestAlertDialog().getButton(AlertDialog.BUTTON_NEGATIVE).performClick();
+        Shadows.shadowOf(Looper.getMainLooper()).idle();
+        assertEquals(Set.of("com.example.notes"), Prefs.readAllowlist(prefs));
+        assertTrue(Prefs.readAutoFcm(prefs));
+    }
+
+    @Test public void confirmClearResetsAllChoicesAndAutomaticPolicy() throws Exception {
+        seedPolicy();
+        ((SearchView) activity.findViewById(R.id.search_view)).setQuery("Telegram", false);
+        invoke("confirmClearAll");
+        ShadowAlertDialog.getLatestAlertDialog().getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+        Shadows.shadowOf(Looper.getMainLooper()).idle();
+        assertTrue(Prefs.readAllowlist(prefs).isEmpty());
+        assertFalse(Prefs.readAutoFcm(prefs));
+        for (AppListAdapter.AppEntry app : apps()) assertFalse(app.checked);
+    }
+
+    @Test public void disconnectedServiceRestoresSwitchState() throws Exception {
+        field("xposedService").set(activity, null);
+        AppListAdapter adapter = (AppListAdapter) field("adapter").get(activity);
+        View row = adapter.getView(0, null, activity.findViewById(R.id.app_list));
+        ((Switch) row.findViewById(R.id.app_check)).performClick();
+        assertFalse(apps().get(0).checked);
+        assertTrue(Prefs.readAllowlist(prefs).isEmpty());
+        assertEquals(activity.getString(R.string.service_unavailable), ShadowToast.getTextOfLatestToast());
+    }
+
+    @Test public void automaticPolicyLocksFcmSwitchButKeepsManualChoices() throws Exception {
+        seedPolicy();
+        assertTrue(apps().get(0).automaticallyAllowed);
+        AppListAdapter adapter = (AppListAdapter) field("adapter").get(activity);
+        View row = adapter.getView(0, null, activity.findViewById(R.id.app_list));
+        Switch toggle = row.findViewById(R.id.app_check);
+        assertTrue(toggle.isChecked());
+        assertFalse(toggle.isEnabled());
+        prefs.edit().putBoolean(Prefs.KEY_AUTO_FCM, false).commit();
+        invoke("readPolicy");
+        assertFalse(apps().get(0).checked);
+        assertTrue(apps().get(3).checked);
+    }
+
+    @Test public void searchExpandsAndBackRestoresCompactToolbar() throws Exception {
+        SearchView search = activity.findViewById(R.id.search_view);
+        assertTrue(search.isIconified());
+        search.setIconified(false);
+        assertEquals(View.GONE, activity.findViewById(R.id.title).getVisibility());
+        search.setQuery("Telegram", false);
+        ((android.window.OnBackInvokedCallback) field("searchBackCallback").get(activity)).onBackInvoked();
+        assertTrue(search.isIconified());
+        assertEquals("", search.getQuery().toString());
+        assertEquals(View.VISIBLE, activity.findViewById(R.id.title).getVisibility());
+    }
+
+    @Test public void menuFiltersPersistAndDoNotChangePolicy() throws Exception {
+        activity.findViewById(R.id.more).performClick();
+        View menu = Shadows.shadowOf(activity.getApplication()).getLatestPopupWindow().getContentView();
+        int[] ids = { R.id.menu_fcm_only, R.id.menu_system_apps, R.id.menu_clear_all,
+                R.id.menu_select_fcm, R.id.menu_auto_fcm, R.id.menu_diagnostics, R.id.menu_about };
+        for (int id : ids) assertNotNull(menu.findViewById(id));
+        assertTrue(menu.findViewById(R.id.menu_fcm_only).createAccessibilityNodeInfo().isCheckable());
+        assertFalse(menu.findViewById(R.id.menu_fcm_only).createAccessibilityNodeInfo().isChecked());
+        menu.findViewById(R.id.menu_fcm_only).performClick();
+        assertTrue(activity.getSharedPreferences("ui_settings", Context.MODE_PRIVATE)
+                .getBoolean("only_fcm", false));
+        assertEquals(2, ((AppListAdapter) field("adapter").get(activity)).getCount());
+        assertTrue(Prefs.readAllowlist(prefs).isEmpty());
+        activity.findViewById(R.id.more).performClick();
+        assertTrue(Shadows.shadowOf(activity.getApplication()).getLatestPopupWindow().getContentView()
+                .findViewById(R.id.menu_fcm_only).createAccessibilityNodeInfo().isChecked());
+        Shadows.shadowOf(activity.getApplication()).getLatestPopupWindow().getContentView()
+                .findViewById(R.id.menu_system_apps).performClick();
+        assertEquals(3, ((AppListAdapter) field("adapter").get(activity)).getCount());
+    }
+
+    @Test public void immersiveInsetsKeepGestureAndKeyboardSpaceInsideTheList() {
+        View root = activity.findViewById(R.id.root);
+        View list = activity.findViewById(R.id.app_list);
+        android.view.WindowInsets bars = new android.view.WindowInsets.Builder()
+                .setInsets(android.view.WindowInsets.Type.systemBars(), android.graphics.Insets.of(0, 24, 0, 32))
+                .build();
+        root.dispatchApplyWindowInsets(bars);
+        assertEquals(0, root.getPaddingBottom());
+        assertEquals(24, activity.findViewById(R.id.header).getPaddingTop());
+        assertEquals(52, list.getPaddingBottom());
+        root.dispatchApplyWindowInsets(new android.view.WindowInsets.Builder(bars)
+                .setInsets(android.view.WindowInsets.Type.ime(), android.graphics.Insets.of(0, 0, 0, 240))
+                .build());
+        assertEquals(260, list.getPaddingBottom());
+        root.dispatchApplyWindowInsets(bars);
+        assertEquals(52, list.getPaddingBottom());
+    }
+
+    @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    public void renderManagementScreen() throws Exception {
+        // An actual Android view render, retained as a visual review artifact.
+        prefs.edit().putStringSet(Prefs.KEY_ALLOWLIST, Set.of("org.telegram.messenger")).commit();
+        invoke("readPolicy");
+        render("management-light.png");
+        activity.findViewById(R.id.more).performClick();
+        Shadows.shadowOf(activity.getApplication()).getLatestPopupWindow().getContentView()
+                .findViewById(R.id.menu_fcm_only).performClick();
+        activity.findViewById(R.id.more).performClick();
+        Shadows.shadowOf(Looper.getMainLooper()).idle();
+        View menu = Shadows.shadowOf(activity.getApplication()).getLatestPopupWindow().getContentView().getRootView();
+        menu.measure(View.MeasureSpec.makeMeasureSpec(344, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(640, View.MeasureSpec.AT_MOST));
+        saveRender(menu, 344, menu.getMeasuredHeight(), "management-menu.png");
+    }
+
+    @Test
+    @Config(sdk = 35, qualifiers = "zh-rCN-w412dp-h892dp-night-mdpi")
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    public void renderDarkManagementScreen() throws Exception {
+        seedPolicy();
+        render("management-dark.png");
+    }
+
+    private void render(String filename) throws Exception {
+        View root = activity.findViewById(R.id.root);
+        root.measure(View.MeasureSpec.makeMeasureSpec(412, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(892, View.MeasureSpec.EXACTLY));
+        root.layout(0, 0, 412, 892);
+        root.measure(View.MeasureSpec.makeMeasureSpec(412, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(892, View.MeasureSpec.EXACTLY));
+        root.layout(0, 0, 412, 892);
+        android.widget.ListView list = activity.findViewById(R.id.app_list);
+        FcmLabelView label = list.getChildAt(0).findViewById(R.id.app_label);
+        assertTrue("FCM name must have a visible line", label.getHeight() >= label.getTextSize());
+        assertTrue(label.getText().toString().contains("Telegram"));
+        saveRender(root, 412, 892, filename);
+    }
+
+    private void saveRender(View view, int width, int height, String filename) throws Exception {
+        view.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY));
+        view.layout(0, 0, width, height);
+        Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        view.draw(new Canvas(bitmap));
+        File directory = new File("build/reports/ui");
+        assertTrue(directory.isDirectory() || directory.mkdirs());
+        try (FileOutputStream output = new FileOutputStream(new File(directory, filename))) {
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, output);
+        }
+        bitmap.recycle();
+    }
+
+    private void seedPolicy() throws Exception {
+        prefs.edit().putStringSet(Prefs.KEY_ALLOWLIST, Set.of("com.example.notes"))
+                .putBoolean(Prefs.KEY_AUTO_FCM, true).commit();
+        invoke("readPolicy");
+    }
+
+    private AppListAdapter.AppEntry app(String pkg, String label, boolean fcm, boolean system) {
+        AppListAdapter.AppEntry entry = new AppListAdapter.AppEntry(pkg, label, fcm);
+        entry.systemApp = system;
+        entry.icon = activity.getDrawable(android.R.drawable.sym_def_app_icon);
+        return entry;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<AppListAdapter.AppEntry> apps() throws Exception {
+        return (List<AppListAdapter.AppEntry>) field("allApps").get(activity);
+    }
+
+    private Field field(String name) throws Exception {
+        Field field = MainActivity.class.getDeclaredField(name);
+        field.setAccessible(true);
+        return field;
+    }
+
+    private void invoke(String name) throws Exception {
+        Method method = MainActivity.class.getDeclaredMethod(name);
+        method.setAccessible(true);
+        method.invoke(activity);
+    }
+}

@@ -1,0 +1,3 @@
+<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="@color/press_overlay">
+    <item android:drawable="@drawable/bg_surface" />
+</ripple>

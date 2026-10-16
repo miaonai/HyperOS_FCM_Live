@@ -1,18 +1,31 @@
 <resources>
     <string name="app_name">Hyper FCM Live</string>
     <string name="xposed_description">Remove China HyperOS restrictions on FCM connection broadcasts and wake selected apps. Power consumption may increase.</string>
-    <string name="select_all">Select visible</string>
-    <string name="clear_all">Clear visible</string>
+    <string name="select_all">Select all FCM apps</string>
+    <string name="clear_all">Clear all selections</string>
     <string name="search_hint">App name or package…</string>
-    <string name="show_system_apps">System apps</string>
-    <string name="show_fcm_only">FCM apps only</string>
+    <string name="more_options">More options</string>
+    <string name="show_system_apps">Show system apps</string>
+    <string name="show_fcm_only">Only show apps containing FCM</string>
+    <string name="auto_fcm">Automatically allow FCM apps</string>
     <string name="contains_fcm">Contains FCM</string>
-    <string name="fcm_not_detected">FCM not detected</string>
     <string name="allow_wake_app">Allow FCM to wake %1$s</string>
-    <string name="app_count">%1$d shown · %2$d allowed in total</string>
+    <string name="auto_allowed_app">%1$s, automatically allowed. Turn off automatic FCM allowance in More options to change this.</string>
+    <string name="auto_fcm_managed">Turn off automatic FCM allowance in More options to change this switch.</string>
     <string name="loading_apps">Checking installed apps…</string>
-    <string name="no_apps">No matching apps. Check filters and app list permission.</string>
+    <string name="no_apps">No matching apps. Try another search or change the filters.</string>
     <string name="load_failed">Could not read apps. Check app list permission and reopen.</string>
     <string name="service_unavailable">LSPosed not connected. Enable the module and reopen to save selections.</string>
     <string name="save_failed">Could not save. Your selection has been restored.</string>
+    <string name="confirm_clear">Clear every manual selection and turn off automatic FCM allowance? This includes apps hidden by search or filters.</string>
+    <plurals name="confirm_select_fcm">
+        <item quantity="one">Allow the %1$d detected FCM app, even if it is a system app or hidden by search or filters? Other manual selections will be kept.</item>
+        <item quantity="other">Allow all %1$d detected FCM apps, including system apps and apps hidden by search or filters? Other manual selections will be kept.</item>
+    </plurals>
+    <string name="no_fcm_apps">No FCM apps detected.</string>
+    <string name="open_diagnostics">Open FCM Diagnostics</string>
+    <string name="diagnostics_unavailable">FCM Diagnostics is unavailable. Check that Google Play services is installed and enabled.</string>
+    <string name="about">About</string>
+    <string name="about_message">Version %1$s\n\nManage which apps FCM can wake on China HyperOS.\n\n“Contains FCM” means the app declares FCM components; it does not confirm registration or delivery. Automatic allowance includes newly installed FCM apps. Turn it off to return to manual selections.\n\nRequires LSPosed. Changes save automatically.\n\nInterface inspired by XiaoTong6666/Sui (MIUIX).</string>
+    <string name="version_unknown">Unknown</string>
 </resources>

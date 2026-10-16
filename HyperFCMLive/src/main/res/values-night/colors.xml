@@ -1,10 +1,12 @@
 <resources>
-    <color name="background">#111318</color>
-    <color name="surface">#1D2027</color>
-    <color name="text_primary">#F0F2F7</color>
-    <color name="text_secondary">#ADB5C5</color>
-    <color name="accent">#91B9FF</color>
-    <color name="fcm_text">#FFD18A</color>
-    <color name="fcm_background">#49351D</color>
-    <color name="neutral_background">#2B303B</color>
+    <color name="background">#080808</color>
+    <color name="surface">#191919</color>
+    <color name="text_primary">#F3F3F3</color>
+    <color name="text_secondary">#A0A0A0</color>
+    <color name="accent">#478FFF</color>
+    <color name="fcm_text">#9BC2FF</color>
+    <color name="fcm_background">#20304A</color>
+    <color name="switch_off">#414141</color>
+    <color name="header_tint">#D9080808</color>
+    <color name="press_overlay">#18FFFFFF</color>
 </resources>

@@ -1,0 +1,9 @@
+<resources>
+    <item name="menu_fcm_only" type="id" />
+    <item name="menu_system_apps" type="id" />
+    <item name="menu_clear_all" type="id" />
+    <item name="menu_select_fcm" type="id" />
+    <item name="menu_auto_fcm" type="id" />
+    <item name="menu_diagnostics" type="id" />
+    <item name="menu_about" type="id" />
+</resources>

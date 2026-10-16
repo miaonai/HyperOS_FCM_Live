@@ -24,6 +24,7 @@ public final class Prefs {
     /** Remote prefs group shared by the app process and system_server. */
     public static final String GROUP_CONFIG = "config";
     public static final String KEY_ALLOWLIST = "allowlist";
+    public static final String KEY_AUTO_FCM = "auto_fcm";
     /** Action the app broadcasts after writing, to refresh system_server. */
     public static final String ACTION_ALLOWLIST_CHANGED = MODULE_PKG + ".ALLOWLIST_CHANGED";
 
@@ -36,9 +37,25 @@ public final class Prefs {
         return set != null ? new HashSet<>(set) : new HashSet<>();
     }
 
+    /** Whether every installed app detected as using FCM is automatically allowed. */
+    public static boolean readAutoFcm(SharedPreferences remotePrefs) {
+        return remotePrefs.getBoolean(KEY_AUTO_FCM, false);
+    }
+
     public static boolean writeAllowlist(Context context, SharedPreferences remotePrefs,
                                       Set<String> allowlist) {
-        if (!remotePrefs.edit().putStringSet(KEY_ALLOWLIST, new HashSet<>(allowlist)).commit()) {
+        // Keep callers that only know about the manual list from silently turning
+        // off the user's automatic FCM policy.
+        return writePolicy(context, remotePrefs, allowlist, readAutoFcm(remotePrefs));
+    }
+
+    /** Persist both parts of the wake policy in one remote-preferences commit. */
+    public static boolean writePolicy(Context context, SharedPreferences remotePrefs,
+                                      Set<String> manualAllowlist, boolean autoFcm) {
+        if (!remotePrefs.edit()
+                .putStringSet(KEY_ALLOWLIST, new HashSet<>(manualAllowlist))
+                .putBoolean(KEY_AUTO_FCM, autoFcm)
+                .commit()) {
             return false;
         }
         context.sendBroadcast(new Intent(ACTION_ALLOWLIST_CHANGED));

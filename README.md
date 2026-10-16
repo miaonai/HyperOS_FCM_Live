@@ -5,10 +5,13 @@
 ## 使用
 
 1. 安装签名的 Release APK，在 LSPosed 中启用模块。作用域为系统框架和电量与性能（`com.miui.powerkeeper`），然后重启手机。
-2. 打开 Hyper FCM Live，勾选允许 FCM 唤醒的应用。选择会自动保存；无法连接 LSPosed 时会在保存时提示。
-3. 可按名称、包名搜索，或选择“仅显示 FCM”。全选和清除只影响当前列表，隐藏应用的选择保持不变。“显示系统应用”和“仅显示 FCM”会自动记忆，下次打开时恢复。
+2. 打开 Hyper FCM Live，通过胶囊开关选择允许 FCM 唤醒的应用。修改会自动保存；无法连接 LSPosed 时提示并恢复原有选择。
+3. 点击右上角搜索图标，按应用名或包名查找。三点菜单提供“仅显示包含 FCM 的应用”和“显示系统应用”，两个筛选条件会自动记忆；菜单用右侧勾选标记表示启用状态，主界面不显示数量统计。
+4. “全选包含 FCM 的应用”经确认后，将当前用户全部检测到的 FCM 应用加入手动白名单，包括系统应用和被搜索、筛选隐藏的应用，保留其他手动选择。“清除所有选择”经确认后清空全部手动选择并关闭自动放行。空白名单不再表示全部放行。
+5. “自动放行包含 FCM 的应用”独立于手动选择，开启后后台检测并放行包含 FCM 的应用，也会在安装或更新应用后重新检测。自动管理的应用开关显示为开启且不可手动修改；关闭自动放行后恢复原有手动选择。后台扫描完成前，新检测的应用可能暂未被自动放行。
+6. 菜单还提供“打开 FCM Diagnostics”和“关于”。Diagnostics 由 Google Play 服务提供；不可用时会显示提示。
 
-应用自动跟随系统浅色／深色主题。桌面图标支持自适应形状，以及 Android 13 起的单色主题图标（是否显示由启动器决定）。
+界面参考 [XiaoTong6666/Sui](https://github.com/XiaoTong6666/Sui) 的 MIUIX 风格，自动跟随系统浅色／深色主题。Android 12 及以上使用 GPU 模糊顶部栏下方的列表，较低版本使用实色背景。底部适配透明手势导航区，末行保留安全间距。桌面图标支持自适应形状，以及 Android 13 起的单色主题图标（是否显示由启动器决定）。
 
 仅以国行 HyperOS 为适配目标。模块不能替代 Google Play 服务、网络连通性、应用的 FCM 注册和通知权限。具体 HyperOS 版本的 Hook 兼容性仍需真机验证。
 
@@ -22,7 +25,7 @@
 
 查询包括停用组件，意图查询包含已停止的应用。只在当前 Android 用户的可见应用中检测；不会扫描其他用户的应用数据。仅包含 Analytics 的 `AppMeasurementReceiver` 不会被当作 FCM 证据。
 
-“包含 FCM”是静态组件检测，不代表已注册 FCM、正在使用 FCM 或推送一定可达。“未检测到 FCM”也不能排除定制实现。检测结果不会自动修改白名单。
+“包含 FCM”标签显示在应用名称之后。它是静态组件检测，不代表已注册 FCM、正在使用 FCM 或推送一定可达。没有标签也不能排除定制实现。自动放行默认关闭；开启时，检测结果参与有效放行策略，但不会覆盖手动白名单。自动检测使用系统主用户的包信息，不跨用户扫描应用数据。
 
 参考：[kooritea/fcmfix](https://github.com/kooritea/fcmfix)、[FirebaseMessagingService 文档](https://firebase.google.com/docs/reference/android/com/google/firebase/messaging/FirebaseMessagingService)、[Android 深色主题文档](https://developer.android.com/develop/ui/views/theming/darktheme)。
 

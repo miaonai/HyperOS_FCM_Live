@@ -1,22 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent" android:layout_height="wrap_content"
-    android:gravity="center_vertical" android:minHeight="88dp" android:orientation="horizontal"
-    android:padding="12dp" android:background="?android:attr/selectableItemBackground">
+    android:gravity="center_vertical" android:minHeight="80dp" android:orientation="horizontal"
+    android:paddingHorizontal="14dp" android:paddingVertical="12dp"
+    android:background="@drawable/bg_app_row" android:descendantFocusability="afterDescendants">
     <ImageView android:id="@+id/app_icon" android:layout_width="44dp" android:layout_height="44dp"
         android:contentDescription="@null" />
     <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-        android:layout_weight="1" android:layout_marginStart="12dp" android:orientation="vertical">
-        <TextView android:id="@+id/app_label" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:textSize="16sp" android:fontFamily="sans-serif-medium"
-            android:textColor="@color/text_primary" />
+        android:layout_weight="1" android:layout_marginStart="12dp" android:layout_marginEnd="10dp"
+        android:orientation="vertical">
+        <io.github.howard20181.hyperos.fcmlive.FcmLabelView android:id="@+id/app_label"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textSize="16sp" android:fontFamily="sans-serif-medium"
+            android:textColor="@color/text_primary" android:singleLine="true" />
         <TextView android:id="@+id/app_pkg" android:layout_width="match_parent"
-            android:layout_height="wrap_content" android:textSize="12sp" android:breakStrategy="simple"
+            android:layout_height="wrap_content" android:layout_marginTop="4dp"
+            android:textSize="11sp" android:maxLines="1" android:ellipsize="middle"
             android:textColor="@color/text_secondary" />
-        <TextView android:id="@+id/app_fcm" android:layout_width="wrap_content"
-            android:layout_height="wrap_content" android:layout_marginTop="6dp"
-            android:paddingHorizontal="6dp" android:paddingVertical="2dp" android:textSize="11sp" />
     </LinearLayout>
-    <CheckBox android:id="@+id/app_check" android:layout_width="48dp" android:layout_height="48dp"
-        android:focusable="false" />
+    <Switch android:id="@+id/app_check" style="@style/CapsuleSwitch"
+        android:layout_width="wrap_content" android:layout_height="48dp" />
 </LinearLayout>
