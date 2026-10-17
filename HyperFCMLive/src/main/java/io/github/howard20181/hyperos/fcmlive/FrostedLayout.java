@@ -11,7 +11,7 @@ import android.util.AttributeSet;
 import android.view.View;
 import android.widget.FrameLayout;
 
-/** Samples only the list behind the header. Header text and controls stay sharp. */
+/** One list recording feeds both the sharp viewport and the unified frosted header. */
 public final class FrostedLayout extends FrameLayout {
     private final Paint tint = new Paint();
     private HeaderBlur blur;
@@ -22,14 +22,23 @@ public final class FrostedLayout extends FrameLayout {
 
     @Override
     protected boolean drawChild(Canvas canvas, View child, long drawingTime) {
+        View header = findViewById(R.id.header);
+        boolean hardwareBlur = Build.VERSION.SDK_INT >= 31 && canvas.isHardwareAccelerated();
+        if (child.getId() == R.id.app_list && hardwareBlur && child.getWidth() > 0 && header != null) {
+            if (blur == null) blur = new HeaderBlur(25 * getResources().getDisplayMetrics().density);
+            blur.record(child, header.getBottom(), getContext().getColor(R.color.background));
+            int save = canvas.save();
+            // The header receives only the blurred image, never sharp content underneath it.
+            canvas.clipRect(child.getLeft(), header.getBottom(), child.getRight(), child.getBottom());
+            blur.drawSharp(canvas);
+            canvas.restoreToCount(save);
+            return true;
+        }
         if (child.getId() == R.id.header) {
-            View list = findViewById(R.id.app_list);
             int save = canvas.save();
             canvas.clipRect(child.getLeft(), child.getTop(), child.getRight(), child.getBottom());
-            if (Build.VERSION.SDK_INT >= 31 && canvas.isHardwareAccelerated()
-                    && list != null && list.getWidth() > 0) {
-                if (blur == null) blur = new HeaderBlur(20 * getResources().getDisplayMetrics().density);
-                blur.draw(canvas, list, child.getBottom(), getContext().getColor(R.color.background));
+            if (hardwareBlur && blur != null) {
+                blur.drawBlurred(canvas);
                 tint.setColor(getContext().getColor(R.color.header_tint));
             } else {
                 tint.setColor(getContext().getColor(R.color.background));
@@ -49,25 +58,36 @@ public final class FrostedLayout extends FrameLayout {
 
     @androidx.annotation.RequiresApi(31)
     private static final class HeaderBlur {
-        private final RenderNode node = new RenderNode("FCM header backdrop");
+        private final RenderNode content = new RenderNode("FCM shared list frame");
+        private final RenderNode backdrop = new RenderNode("FCM unified header backdrop");
         private final int overscan;
 
         HeaderBlur(float radius) {
-            overscan = (int) Math.ceil(radius * 2);
-            node.setRenderEffect(RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP));
+            overscan = (int) Math.ceil(radius * 3);
+            backdrop.setRenderEffect(RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP));
         }
 
-        void draw(Canvas canvas, View source, int headerBottom, int background) {
-            // Include pixels below the header to avoid a hard blur edge when scrolling.
-            int height = Math.min(source.getHeight(), headerBottom - source.getTop() + overscan);
-            node.setPosition(source.getLeft(), source.getTop(), source.getRight(), source.getTop() + height);
-            Canvas recording = node.beginRecording(source.getWidth(), height);
+        void record(View source, int headerBottom, int background) {
+            // Use the real viewport dimensions. Drawing a scrollable View into a shorter canvas
+            // can change its clipping/culling relative to the visible list during placement.
+            content.setPosition(source.getLeft(), source.getTop(), source.getRight(), source.getBottom());
+            Canvas recording = content.beginRecording(source.getWidth(), source.getHeight());
             recording.drawColor(background);
             source.draw(recording);
-            node.endRecording();
-            canvas.drawRenderNode(node);
+            content.endRecording();
+            // Limit the blur pass to the header plus its kernel margin, while sharing the full
+            // viewport recording. No second View draw and no full-screen offscreen blur texture.
+            int height = Math.min(source.getHeight(), headerBottom - source.getTop() + overscan);
+            backdrop.setPosition(source.getLeft(), source.getTop(), source.getRight(), source.getTop() + height);
+            Canvas blurred = backdrop.beginRecording(source.getWidth(), height);
+            blurred.translate(-source.getLeft(), -source.getTop());
+            blurred.drawRenderNode(content);
+            backdrop.endRecording();
         }
 
-        void release() { node.discardDisplayList(); }
+        void drawSharp(Canvas canvas) { canvas.drawRenderNode(content); }
+        void drawBlurred(Canvas canvas) { canvas.drawRenderNode(backdrop); }
+
+        void release() { content.discardDisplayList(); backdrop.discardDisplayList(); }
     }
 }

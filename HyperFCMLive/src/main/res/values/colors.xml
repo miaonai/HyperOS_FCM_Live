@@ -1,6 +1,7 @@
 <resources>
     <color name="background">#F7F7F7</color>
     <color name="surface">#FFFFFF</color>
+    <color name="search_surface">#ECECEC</color>
     <color name="text_primary">#191919</color>
     <color name="text_secondary">#707070</color>
     <color name="accent">#3482FF</color>
@@ -8,7 +9,7 @@
     <color name="fcm_background">#EAF2FF</color>
     <color name="switch_off">#D8D8D8</color>
     <color name="switch_thumb">#FFFFFF</color>
-    <color name="header_tint">#D9F7F7F7</color>
+    <color name="header_tint">#CCF7F7F7</color>
     <color name="press_overlay">#10000000</color>
     <color name="icon_background">#3482FF</color>
 </resources>

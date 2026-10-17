@@ -3,7 +3,10 @@ package io.github.howard20181.hyperos.fcmlive;
 import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.res.ColorStateList;
+import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.os.Build;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -12,7 +15,10 @@ import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
 import android.view.Window;
 import android.view.WindowManager;
+import android.widget.Button;
+import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.TextView;
 
 /** Bottom-attached modal surface, with no dim layer and a single enter/exit animation owner. */
 final class ManagementSheet extends AlertDialog {
@@ -55,8 +61,7 @@ final class ManagementSheet extends AlertDialog {
 
     @Override protected void onStart() {
         super.onStart();
-        if (getButton(BUTTON_POSITIVE) != null) getButton(BUTTON_POSITIVE).setAllCaps(false);
-        if (getButton(BUTTON_NEGATIVE) != null) getButton(BUTTON_NEGATIVE).setAllCaps(false);
+        styleControls();
         View panel = getWindow().getDecorView();
         if (!ValueAnimator.areAnimatorsEnabled()) return;
         // Hide before the first frame; dimensions and background are fixed before show().
@@ -72,6 +77,66 @@ final class ManagementSheet extends AlertDialog {
             return true;
         };
         panel.getViewTreeObserver().addOnPreDrawListener(entrance);
+    }
+
+    private void styleControls() {
+        int titleId = getContext().getResources().getIdentifier("alertTitle", "id", "android");
+        TextView title = titleId == 0 ? null : getWindow().findViewById(titleId);
+        if (title != null) title.setGravity(Gravity.CENTER);
+
+        Button positive = getButton(BUTTON_POSITIVE);
+        Button negative = getButton(BUTTON_NEGATIVE);
+        int accent = getContext().getColor(R.color.accent);
+        int primaryText = getContext().getColor(R.color.text_primary);
+        int neutral = blend(getContext().getColor(R.color.surface), primaryText, 0.08f);
+        if (positive != null) styleButton(positive, accent, Color.WHITE, 0x30FFFFFF);
+        if (negative != null) styleButton(negative, neutral, primaryText, 0x18000000);
+
+        View buttonParent = positive != null ? (View) positive.getParent()
+                : negative != null ? (View) negative.getParent() : null;
+        if (buttonParent instanceof LinearLayout row) {
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            // The platform alert button bar includes an invisible weighted spacer. Remove it
+            // so the retained AlertDialog buttons can share the row evenly.
+            for (int i = 0; i < row.getChildCount(); i++) {
+                View child = row.getChildAt(i);
+                if (child != positive && child != negative) child.setVisibility(View.GONE);
+            }
+        }
+        if (negative != null) sizeButton(negative);
+        if (positive != null) sizeButton(positive);
+    }
+
+    private void styleButton(Button button, int fill, int text, int ripple) {
+        GradientDrawable shape = new GradientDrawable();
+        shape.setColor(fill);
+        shape.setCornerRadius(dp(16));
+        button.setBackground(new RippleDrawable(ColorStateList.valueOf(ripple), shape, null));
+        button.setTextColor(text);
+        button.setAllCaps(false);
+        button.setMinHeight(dp(48));
+        button.setMinimumWidth(0);
+        button.setPadding(dp(12), 0, dp(12), 0);
+        button.setElevation(0);
+        button.setStateListAnimator(null);
+    }
+
+    private void sizeButton(Button button) {
+        ViewGroup.LayoutParams params = button.getLayoutParams();
+        if (params instanceof LinearLayout.LayoutParams linearParams) {
+            linearParams.width = 0;
+            linearParams.weight = 1;
+            linearParams.setMargins(dp(6), dp(8), dp(6), dp(12));
+            button.setLayoutParams(linearParams);
+        }
+    }
+
+    private int blend(int base, int overlay, float amount) {
+        float inverse = 1f - amount;
+        return Color.rgb(
+                Math.round(Color.red(base) * inverse + Color.red(overlay) * amount),
+                Math.round(Color.green(base) * inverse + Color.green(overlay) * amount),
+                Math.round(Color.blue(base) * inverse + Color.blue(overlay) * amount));
     }
 
     @Override public void dismiss() {

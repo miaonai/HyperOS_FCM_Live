@@ -16,7 +16,6 @@ import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.AbsListView;
-import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.SearchView;
 import android.widget.TextView;
@@ -59,7 +58,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     private boolean policyReady;
     private long policyReadRevision;
     private AppListAdapter adapter;
-    private SearchView searchView;
+    private SearchControl searchView;
     private SharedPreferences uiSettings;
     private boolean showSystemApps;
     private boolean onlyFcm;
@@ -102,8 +101,8 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         });
         setupInsets();
         searchView.setOnQueryTextListener(this);
-        searchView.setOnSearchClickListener(view -> setSearchExpanded(true));
-        searchView.setOnCloseListener(() -> { setSearchExpanded(false); return false; });
+        searchView.setTitleView(findViewById(R.id.title));
+        searchView.setOnExpansionChangedListener(this::setSearchExpanded);
         if (savedInstanceState != null) {
             if (savedInstanceState.getBoolean("search_expanded")) {
                 searchView.setIconified(false);
@@ -172,11 +171,6 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     }
 
     private void setSearchExpanded(boolean expanded) {
-        findViewById(R.id.title).setVisibility(expanded ? View.GONE : View.VISIBLE);
-        LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) searchView.getLayoutParams();
-        params.width = expanded ? 0 : dp(48);
-        params.weight = expanded ? 1 : 0;
-        searchView.setLayoutParams(params);
         if (!expanded) hideKeyboard();
         if (Build.VERSION.SDK_INT >= 33) {
             if (expanded && searchBackCallback == null) {

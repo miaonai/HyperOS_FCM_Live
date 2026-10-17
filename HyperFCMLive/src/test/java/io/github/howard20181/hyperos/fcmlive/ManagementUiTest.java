@@ -10,7 +10,7 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.os.Looper;
 import android.view.View;
-import android.widget.SearchView;
+
 import android.widget.CompoundButton;
 
 import org.junit.After;
@@ -75,7 +75,7 @@ public class ManagementUiTest {
     @Test public void selectAllIncludesHiddenSystemAppsAndPreservesManualChoices() throws Exception {
         prefs.edit().putStringSet(Prefs.KEY_ALLOWLIST, Set.of("com.example.notes")).commit();
         invoke("readPolicy");
-        ((SearchView) activity.findViewById(R.id.search_view)).setQuery("Telegram", false);
+        ((SearchControl) activity.findViewById(R.id.search_view)).setQuery("Telegram", false);
         invoke("confirmSelectFcm");
         AlertDialog dialog = ShadowAlertDialog.getLatestAlertDialog();
         assertEquals(Set.of("com.example.notes"), Prefs.readAllowlist(prefs));
@@ -96,7 +96,7 @@ public class ManagementUiTest {
 
     @Test public void confirmClearResetsAllChoicesAndAutomaticPolicy() throws Exception {
         seedPolicy();
-        ((SearchView) activity.findViewById(R.id.search_view)).setQuery("Telegram", false);
+        ((SearchControl) activity.findViewById(R.id.search_view)).setQuery("Telegram", false);
         invoke("confirmClearAll");
         ShadowAlertDialog.getLatestAlertDialog().getButton(AlertDialog.BUTTON_POSITIVE).performClick();
         awaitWrites();
@@ -130,15 +130,80 @@ public class ManagementUiTest {
     }
 
     @Test public void searchExpandsAndBackRestoresCompactToolbar() throws Exception {
-        SearchView search = activity.findViewById(R.id.search_view);
+        SearchControl search = activity.findViewById(R.id.search_view);
         assertTrue(search.isIconified());
         search.setIconified(false);
+        settleMotion();
         assertEquals(View.GONE, activity.findViewById(R.id.title).getVisibility());
         search.setQuery("Telegram", false);
         ((android.window.OnBackInvokedCallback) field("searchBackCallback").get(activity)).onBackInvoked();
         assertTrue(search.isIconified());
         assertEquals("", search.getQuery().toString());
+        settleMotion();
         assertEquals(View.VISIBLE, activity.findViewById(R.id.title).getVisibility());
+    }
+
+    @Test public void searchMorphKeepsHeaderHeightAndCanReverseMidFlight() throws Exception {
+        View root = activity.findViewById(R.id.root);
+        layoutForMotion(root);
+        SearchControl search = activity.findViewById(R.id.search_view);
+        View header = activity.findViewById(R.id.header);
+        int height = header.getHeight();
+        View magnifier = ((android.view.ViewGroup) search).getChildAt(1);
+        float compactX = magnifier.getX();
+        search.setIconified(false);
+        assertEquals(compactX, magnifier.getX(), 0.01f);
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(100));
+        float intermediateX = magnifier.getX();
+        assertTrue(intermediateX > 0 && intermediateX < compactX);
+        search.setIconified(true);
+        assertEquals("Reversing must start at the current icon position", intermediateX, magnifier.getX(), 0.01f);
+        settleMotion();
+        assertEquals(compactX, magnifier.getX(), 0.01f);
+        search.setIconified(false);
+        settleMotion();
+        assertEquals(0f, magnifier.getX(), 0.01f);
+        assertEquals(height, header.getHeight());
+        android.widget.EditText input = (android.widget.EditText) ((android.view.ViewGroup) search).getChildAt(0);
+        assertEquals("搜索", input.getHint().toString());
+        search.setQuery("mail", false);
+        assertEquals(1, ((AppListAdapter) field("adapter").get(activity)).getCount());
+    }
+
+    @Test public void confirmationActionsAreEqualWidthAndTitleCentered() throws Exception {
+        invoke("confirmClearAll");
+        AlertDialog dialog = ShadowAlertDialog.getLatestAlertDialog();
+        settleMotion();
+        View panel = dialog.getWindow().getDecorView();
+        panel.measure(View.MeasureSpec.makeMeasureSpec(388, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(700, View.MeasureSpec.AT_MOST));
+        panel.layout(0, 0, 388, panel.getMeasuredHeight());
+        android.widget.Button cancel = dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
+        android.widget.Button confirm = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+        assertEquals(cancel.getWidth(), confirm.getWidth());
+        assertTrue(cancel.getWidth() > 130);
+        assertTrue(cancel.getHeight() >= 48);
+        assertTrue(cancel.getLeft() < confirm.getLeft());
+        assertTrue(confirm.getBackground() instanceof android.graphics.drawable.RippleDrawable);
+        int titleId = activity.getResources().getIdentifier("alertTitle", "id", "android");
+        android.widget.TextView title = dialog.findViewById(titleId);
+        assertEquals(android.view.Gravity.CENTER, title.getGravity());
+    }
+
+    @Test @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    public void renderSearchAndConfirmation() throws Exception {
+        View root = activity.findViewById(R.id.root);
+        layoutForMotion(root);
+        SearchControl search = activity.findViewById(R.id.search_view);
+        search.setIconified(false);
+        settleMotion();
+        saveRender(root, 412, 892, "management-search.png");
+        invoke("confirmClearAll");
+        settleMotion();
+        View panel = ShadowAlertDialog.getLatestAlertDialog().getWindow().getDecorView();
+        panel.measure(View.MeasureSpec.makeMeasureSpec(388, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(700, View.MeasureSpec.AT_MOST));
+        saveRender(panel, 388, panel.getMeasuredHeight(), "management-confirm.png");
     }
 
     @Test public void enabledAppsComeFirstAfterLoadToggleAndAutomaticPolicyChanges() throws Exception {
@@ -197,7 +262,7 @@ public class ManagementUiTest {
         assertTrue("Moved row must start at its old position: oldTop=" + oldTop
                 + ", newTop=" + notes.getTop(), notes.getTranslationY() > 0);
         assertEquals(oldTop, notes.getTop() + notes.getTranslationY(), 1f);
-        ((SearchView) activity.findViewById(R.id.search_view)).setQuery("笔记", false);
+        ((SearchControl) activity.findViewById(R.id.search_view)).setQuery("笔记", false);
         layoutForMotion(root);
         assertEquals(1, list.getCount());
         assertEquals("com.example.notes", AppListAdapter.boundPackage(list.getChildAt(0)));

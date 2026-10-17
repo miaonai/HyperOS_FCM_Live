@@ -6,7 +6,7 @@
     <io.github.howard20181.hyperos.fcmlive.AnimatedAppList android:id="@+id/app_list" android:layout_width="match_parent"
         android:layout_height="match_parent" android:paddingHorizontal="16dp"
         android:clipToPadding="false" android:divider="@android:color/transparent"
-        android:dividerHeight="8dp" android:scrollbarStyle="outsideOverlay"
+        android:dividerHeight="8dp" android:scrollbars="none"
         android:listSelector="@android:color/transparent" />
     <LinearLayout android:id="@+id/empty_state" android:layout_width="match_parent"
         android:layout_height="wrap_content" android:layout_gravity="center"
@@ -21,22 +21,21 @@
     </LinearLayout>
     <LinearLayout android:id="@+id/header" android:layout_width="match_parent"
         android:layout_height="wrap_content" android:orientation="vertical">
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:minHeight="64dp" android:paddingStart="24dp" android:paddingEnd="12dp"
-            android:gravity="center_vertical" android:orientation="horizontal">
-            <TextView android:id="@+id/title" android:layout_width="0dp"
-                android:layout_height="wrap_content" android:layout_weight="1"
+        <FrameLayout android:layout_width="match_parent" android:layout_height="64dp"
+            android:layout_marginStart="16dp" android:layout_marginEnd="12dp">
+            <TextView android:id="@+id/title" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:layout_gravity="center_vertical"
+                android:layout_marginStart="8dp" android:layout_marginEnd="104dp"
                 android:text="@string/app_name" android:textSize="24sp"
                 android:fontFamily="sans-serif-medium" android:textColor="@color/text_primary"
                 android:accessibilityHeading="true" android:maxLines="1" android:ellipsize="end" />
-            <SearchView android:id="@+id/search_view" android:layout_width="48dp"
-                android:layout_height="wrap_content" android:minHeight="48dp"
-                android:iconifiedByDefault="true" android:queryHint="@string/search_hint"
-                android:searchIcon="@drawable/ic_search" android:background="@drawable/bg_icon_button" />
+            <io.github.howard20181.hyperos.fcmlive.SearchControl android:id="@+id/search_view"
+                android:layout_width="match_parent" android:layout_height="48dp"
+                android:layout_gravity="center_vertical" android:layout_marginEnd="52dp" />
             <ImageButton android:id="@+id/more" android:layout_width="48dp"
-                android:layout_height="48dp" android:layout_marginStart="4dp"
+                android:layout_height="48dp" android:layout_gravity="end|center_vertical"
                 android:src="@drawable/ic_more" android:background="@drawable/bg_icon_button"
                 android:contentDescription="@string/more_options" />
-        </LinearLayout>
+        </FrameLayout>
     </LinearLayout>
 </io.github.howard20181.hyperos.fcmlive.FrostedLayout>

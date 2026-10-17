@@ -1,12 +1,13 @@
 <resources>
     <color name="background">#080808</color>
     <color name="surface">#191919</color>
+    <color name="search_surface">#252525</color>
     <color name="text_primary">#F3F3F3</color>
     <color name="text_secondary">#A0A0A0</color>
     <color name="accent">#478FFF</color>
     <color name="fcm_text">#9BC2FF</color>
     <color name="fcm_background">#20304A</color>
     <color name="switch_off">#414141</color>
-    <color name="header_tint">#D9080808</color>
+    <color name="header_tint">#CC080808</color>
     <color name="press_overlay">#18FFFFFF</color>
 </resources>
