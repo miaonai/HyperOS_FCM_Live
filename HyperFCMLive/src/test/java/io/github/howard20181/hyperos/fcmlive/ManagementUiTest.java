@@ -190,11 +190,17 @@ public class ManagementUiTest {
         assertEquals(cancel.getWidth(), confirm.getWidth());
         assertTrue(cancel.getWidth() > 130);
         assertTrue(cancel.getHeight() >= 48);
+        android.graphics.Rect visibleButton = new android.graphics.Rect();
+        assertTrue(cancel.getGlobalVisibleRect(visibleButton));
+        assertEquals("The button's rounded background must not be clipped", cancel.getHeight(), visibleButton.height());
         assertTrue(cancel.getLeft() < confirm.getLeft());
         assertTrue(confirm.getBackground() instanceof android.graphics.drawable.RippleDrawable);
         int titleId = activity.getResources().getIdentifier("alertTitle", "id", "android");
         android.widget.TextView title = dialog.findViewById(titleId);
         assertEquals(android.view.Gravity.CENTER, title.getGravity());
+        View titleParent = (View) title.getParent();
+        assertEquals(titleParent.getWidth() - titleParent.getPaddingLeft() - titleParent.getPaddingRight(),
+                title.getWidth());
     }
 
     @Test @GraphicsMode(GraphicsMode.Mode.NATIVE)

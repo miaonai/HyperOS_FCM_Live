@@ -82,7 +82,12 @@ final class ManagementSheet extends AlertDialog {
     private void styleControls() {
         int titleId = getContext().getResources().getIdentifier("alertTitle", "id", "android");
         TextView title = titleId == 0 ? null : getWindow().findViewById(titleId);
-        if (title != null) title.setGravity(Gravity.CENTER);
+        if (title != null) {
+            title.setGravity(Gravity.CENTER);
+            ViewGroup.LayoutParams titleParams = title.getLayoutParams();
+            titleParams.width = ViewGroup.LayoutParams.MATCH_PARENT;
+            title.setLayoutParams(titleParams);
+        }
 
         Button positive = getButton(BUTTON_POSITIVE);
         Button negative = getButton(BUTTON_NEGATIVE);
@@ -96,6 +101,12 @@ final class ManagementSheet extends AlertDialog {
                 : negative != null ? (View) negative.getParent() : null;
         if (buttonParent instanceof LinearLayout row) {
             row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setBaselineAligned(false);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(12), dp(4), dp(12), dp(4));
+            // AlertDialogLayout reserves the button panel's minimum height before the message.
+            // Include both button height and margins so the rounded tops cannot be clipped.
+            row.setMinimumHeight(dp(76));
             // The platform alert button bar includes an invisible weighted spacer. Remove it
             // so the retained AlertDialog buttons can share the row evenly.
             for (int i = 0; i < row.getChildCount(); i++) {
@@ -115,6 +126,7 @@ final class ManagementSheet extends AlertDialog {
         button.setTextColor(text);
         button.setAllCaps(false);
         button.setMinHeight(dp(48));
+        button.setMinimumHeight(dp(48));
         button.setMinimumWidth(0);
         button.setPadding(dp(12), 0, dp(12), 0);
         button.setElevation(0);
@@ -125,6 +137,7 @@ final class ManagementSheet extends AlertDialog {
         ViewGroup.LayoutParams params = button.getLayoutParams();
         if (params instanceof LinearLayout.LayoutParams linearParams) {
             linearParams.width = 0;
+            linearParams.height = ViewGroup.LayoutParams.WRAP_CONTENT;
             linearParams.weight = 1;
             linearParams.setMargins(dp(6), dp(8), dp(6), dp(12));
             button.setLayoutParams(linearParams);
