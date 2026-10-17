@@ -215,6 +215,7 @@ public class ManagementUiTest {
     }
 
     @Test public void newlyRevealedAppsStayBelowExistingRowsDuringPlacement() throws Exception {
+        apps().add(1, apps().remove(3));
         field("onlyFcm").setBoolean(activity, true);
         invoke("filterApps");
         View root = activity.findViewById(R.id.root);
