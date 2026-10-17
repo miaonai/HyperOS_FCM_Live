@@ -163,7 +163,9 @@ public final class SearchControl extends FrameLayout {
         input.setTranslationX(rtl ? -offset : offset);
         input.setAlpha(progress);
         close.setAlpha(progress);
-        if (progress == 0) { input.setVisibility(INVISIBLE); close.setVisibility(INVISIBLE); }
+        int controlsVisibility = progress == 0 ? INVISIBLE : VISIBLE;
+        input.setVisibility(controlsVisibility);
+        close.setVisibility(controlsVisibility);
         if (title != null) {
             title.setAlpha(Math.max(0, 1 - progress * 2));
             title.setVisibility(progress == 1 ? GONE : VISIBLE);

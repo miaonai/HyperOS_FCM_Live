@@ -153,9 +153,14 @@ public class ManagementUiTest {
         float compactX = magnifier.getX();
         search.setIconified(false);
         assertEquals(compactX, magnifier.getX(), 0.01f);
-        Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(100));
+        Field morphField = SearchControl.class.getDeclaredField("morph");
+        morphField.setAccessible(true);
+        android.animation.ValueAnimator opening = (android.animation.ValueAnimator) morphField.get(search);
+        assertNotNull("Search should animate after layout", opening);
+        opening.setCurrentPlayTime(100);
         float intermediateX = magnifier.getX();
-        assertTrue(intermediateX > 0 && intermediateX < compactX);
+        assertTrue("Icon should move between endpoints: " + intermediateX + " / " + compactX,
+                intermediateX > 0 && intermediateX < compactX);
         search.setIconified(true);
         assertEquals("Reversing must start at the current icon position", intermediateX, magnifier.getX(), 0.01f);
         settleMotion();
@@ -165,6 +170,8 @@ public class ManagementUiTest {
         assertEquals(0f, magnifier.getX(), 0.01f);
         assertEquals(height, header.getHeight());
         android.widget.EditText input = (android.widget.EditText) ((android.view.ViewGroup) search).getChildAt(0);
+        assertEquals(View.VISIBLE, input.getVisibility());
+        assertEquals(View.VISIBLE, ((android.view.ViewGroup) search).getChildAt(2).getVisibility());
         assertEquals("搜索", input.getHint().toString());
         search.setQuery("mail", false);
         assertEquals(1, ((AppListAdapter) field("adapter").get(activity)).getCount());
