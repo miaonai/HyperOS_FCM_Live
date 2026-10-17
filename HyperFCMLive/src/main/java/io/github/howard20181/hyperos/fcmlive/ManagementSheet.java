@@ -4,7 +4,6 @@ import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.graphics.drawable.GradientDrawable;
-import android.graphics.Rect;
 import android.os.Build;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -21,6 +20,7 @@ final class ManagementSheet extends AlertDialog {
     private boolean dragging;
     private float downX;
     private float downY;
+    private boolean scrollingContent;
     private ViewTreeObserver.OnPreDrawListener entrance;
 
     ManagementSheet(Activity activity) {
@@ -111,11 +111,13 @@ final class ManagementSheet extends AlertDialog {
                 downX = event.getRawX();
                 downY = event.getRawY();
                 dragging = false;
+                // Keep one owner for the whole gesture; reaching the scroll edge must not jump the sheet.
+                scrollingContent = canScrollUp(panel);
             }
             case MotionEvent.ACTION_MOVE -> {
                 float delta = event.getRawY() - downY;
                 if (!dragging && delta > dp(12) && delta > Math.abs(event.getRawX() - downX)
-                        && !canScrollUp(panel)) {
+                        && !scrollingContent) {
                     dragging = true;
                     panel.animate().cancel();
                     MotionEvent cancel = MotionEvent.obtain(event);
@@ -144,8 +146,11 @@ final class ManagementSheet extends AlertDialog {
 
     private boolean canScrollUp(View view) {
         if (view instanceof ScrollView && view.canScrollVertically(-1)) {
-            Rect bounds = new Rect();
-            if (view.getGlobalVisibleRect(bounds) && bounds.contains((int) downX, (int) downY)) return true;
+            // MotionEvent raw coordinates are screen-based, while getGlobalVisibleRect is root-based.
+            int[] location = new int[2];
+            view.getLocationOnScreen(location);
+            if (downX >= location[0] && downX < location[0] + view.getWidth()
+                    && downY >= location[1] && downY < location[1] + view.getHeight()) return true;
         }
         if (view instanceof ViewGroup group) {
             for (int i = 0; i < group.getChildCount(); i++) if (canScrollUp(group.getChildAt(i))) return true;

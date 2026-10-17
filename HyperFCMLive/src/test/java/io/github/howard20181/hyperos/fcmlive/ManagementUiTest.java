@@ -509,6 +509,16 @@ public class ManagementUiTest {
         scroll.scrollTo(0, 200);
         assertTrue(scroll.canScrollVertically(-1));
         long now = android.os.SystemClock.uptimeMillis();
+        int[] scrollLocation = new int[2];
+        int[] panelLocation = new int[2];
+        scroll.getLocationOnScreen(scrollLocation);
+        panel.getLocationOnScreen(panelLocation);
+        float messageY = scrollLocation[1] - panelLocation[1] + 12;
+        dispatchDrag(dialog, now, now, android.view.MotionEvent.ACTION_DOWN, messageY);
+        dispatchDrag(dialog, now, now + 20, android.view.MotionEvent.ACTION_MOVE, messageY + 30);
+        assertEquals("Dragging scrolled content must not move the sheet", 0f, panel.getTranslationY(), 0.01f);
+        dispatchDrag(dialog, now, now + 40, android.view.MotionEvent.ACTION_UP, messageY + 30);
+        now += 80;
         dispatchDrag(dialog, now, now, android.view.MotionEvent.ACTION_DOWN, 20);
         dispatchDrag(dialog, now, now + 40, android.view.MotionEvent.ACTION_MOVE, 140);
         assertTrue("Title drag should move the sheet even when its message is scrolled", panel.getTranslationY() > 0);
@@ -529,7 +539,13 @@ public class ManagementUiTest {
     }
 
     private void dispatchDrag(AlertDialog dialog, long down, long time, int action, float y) {
-        android.view.MotionEvent event = android.view.MotionEvent.obtain(down, time, action, 40, y, 0);
+        View panel = dialog.getWindow().getDecorView();
+        int[] location = new int[2];
+        panel.getLocationOnScreen(location);
+        float windowY = location[1] - panel.getTranslationY();
+        android.view.MotionEvent event = android.view.MotionEvent.obtain(down, time, action,
+                location[0] + 40, windowY + y, 0);
+        event.offsetLocation(-location[0], -windowY);
         dialog.dispatchTouchEvent(event);
         event.recycle();
     }
