@@ -17,12 +17,14 @@ import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.annotation.Config;
 import org.robolectric.annotation.GraphicsMode;
+import org.robolectric.annotation.Implementation;
+import org.robolectric.annotation.Implements;
 import org.robolectric.android.controller.ActivityController;
 import org.robolectric.util.ReflectionHelpers;
 
 /** EdgeEffect mutates its recording canvas's RenderNode, not the icon View's scale. */
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk = 35, qualifiers = "w412dp-h892dp-mdpi")
+@Config(sdk = 35, qualifiers = "w412dp-h892dp-mdpi", shadows = HeaderOverscrollTest.StretchEdgeShadow.class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 public class HeaderOverscrollTest {
     @Test public void alternatingOverscrollKeepsStretchOnTheFrameworkOwnedListNode() {
@@ -55,20 +57,29 @@ public class HeaderOverscrollTest {
             RenderNode frame = new RenderNode("overscroll regression frame");
             frame.setPosition(0, 0, 412, 892);
             try {
-                for (int cycle = 0; cycle < 4; cycle++) {
+                draw(root, frame);
+                for (int cycle = 0; cycle < 8; cycle++) {
                     TrackingEdge active = cycle % 2 == 0 ? top : bottom;
                     active.onPullDistance(0.2f, 0.5f);
+                    assertTrue("Pulling beyond either edge must produce feedback", active.getDistance() > 0);
+                    int before = active.draws;
                     list.invalidate();
                     draw(root, frame);
-                    assertTrue("Actual ListView edge must be drawn", active.draws > 0);
+                    assertTrue("Actual ListView edge must be drawn every time", active.draws > before);
                     assertSame("Stretch must belong to the ListView node cleared by View.updateDisplayListIfDirty",
                             listNode, active.owner);
                     active.onRelease();
-                    active.finish();
+                    org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofMillis(16));
+                }
+                for (int frameIndex = 0; frameIndex < 200 && (!top.isFinished() || !bottom.isFinished()); frameIndex++) {
+                    org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofMillis(16));
                     list.invalidate();
                     draw(root, frame);
-                    assertTrue(active.isFinished());
                 }
+                assertTrue("Top spring must settle after release", top.isFinished());
+                assertTrue("Bottom spring must settle after release", bottom.isFinished());
+                assertEquals(0f, top.getDistance(), 0f);
+                assertEquals(0f, bottom.getDistance(), 0f);
             } finally { frame.discardDisplayList(); }
         }
     }
@@ -86,6 +97,15 @@ public class HeaderOverscrollTest {
             owner = ReflectionHelpers.getField(canvas, "mNode");
             draws++;
             return super.draw(canvas);
+        }
+    }
+
+    // Robolectric disables EdgeEffect on API 31+ by default. Exercise Android's real stretch
+    // code instead; the test explicitly advances time and draws until both springs settle.
+    @Implements(EdgeEffect.class)
+    public static class StretchEdgeShadow {
+        @Implementation protected int getCurrentEdgeEffectBehavior() {
+            return android.animation.ValueAnimator.areAnimatorsEnabled() ? 1 : -1;
         }
     }
 }
