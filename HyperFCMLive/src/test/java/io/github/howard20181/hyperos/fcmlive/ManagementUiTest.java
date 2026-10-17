@@ -33,6 +33,9 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import io.github.libxposed.service.XposedService;
 
@@ -77,7 +80,7 @@ public class ManagementUiTest {
         AlertDialog dialog = ShadowAlertDialog.getLatestAlertDialog();
         assertEquals(Set.of("com.example.notes"), Prefs.readAllowlist(prefs));
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
-        Shadows.shadowOf(Looper.getMainLooper()).idle();
+        awaitWrites();
         assertEquals(Set.of("org.telegram.messenger", "com.example.mail", "com.example.system",
                 "com.example.notes"), Prefs.readAllowlist(prefs));
     }
@@ -96,7 +99,7 @@ public class ManagementUiTest {
         ((SearchView) activity.findViewById(R.id.search_view)).setQuery("Telegram", false);
         invoke("confirmClearAll");
         ShadowAlertDialog.getLatestAlertDialog().getButton(AlertDialog.BUTTON_POSITIVE).performClick();
-        Shadows.shadowOf(Looper.getMainLooper()).idle();
+        awaitWrites();
         assertTrue(Prefs.readAllowlist(prefs).isEmpty());
         assertFalse(Prefs.readAutoFcm(prefs));
         for (AppListAdapter.AppEntry app : apps()) assertFalse(app.checked);
@@ -146,17 +149,18 @@ public class ManagementUiTest {
         View row = adapter.getView(2, null, activity.findViewById(R.id.app_list));
         assertEquals("com.example.mail", adapter.getItem(2).packageName);
         row.findViewById(R.id.app_check).performClick();
-        assertTrue(Prefs.readAllowlist(prefs).contains("com.example.mail"));
         assertEquals("com.example.mail", adapter.getItem(0).packageName);
         assertEquals("com.example.notes", adapter.getItem(1).packageName);
         assertFalse(adapter.getItem(2).checked);
+        awaitWrites();
+        assertTrue(Prefs.readAllowlist(prefs).contains("com.example.mail"));
         prefs.edit().putBoolean(Prefs.KEY_AUTO_FCM, true).commit();
         invoke("readPolicy");
         assertEquals("org.telegram.messenger", adapter.getItem(0).packageName);
         assertTrue(adapter.getItem(0).automaticallyAllowed);
         invoke("confirmClearAll");
         ShadowAlertDialog.getLatestAlertDialog().getButton(AlertDialog.BUTTON_POSITIVE).performClick();
-        Shadows.shadowOf(Looper.getMainLooper()).idle();
+        awaitWrites();
         assertEquals("org.telegram.messenger", adapter.getItem(0).packageName);
         for (int i = 0; i < adapter.getCount(); i++) assertFalse(adapter.getItem(i).checked);
     }
@@ -178,6 +182,34 @@ public class ManagementUiTest {
         assertEquals(0, attributes.flags & android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
         assertEquals(0f, attributes.dimAmount, 0f);
         assertEquals(0, attributes.getBlurBehindRadius());
+    }
+
+    @Test public void reorderedRowMovesFromItsPreviousPositionAndCanBeFilteredMidFlight() throws Exception {
+        View root = activity.findViewById(R.id.root);
+        layoutForMotion(root);
+        AnimatedAppList list = activity.findViewById(R.id.app_list);
+        float oldTop = list.getChildAt(2).getTop();
+        prefs.edit().putStringSet(Prefs.KEY_ALLOWLIST, Set.of("com.example.notes")).commit();
+        invoke("readPolicy");
+        layoutForMotion(root);
+        View notes = list.getChildAt(0);
+        assertEquals("com.example.notes", AppListAdapter.boundPackage(notes));
+        assertTrue(notes.getTranslationY() > 0);
+        assertEquals(oldTop, notes.getTop() + notes.getTranslationY(), 1f);
+        ((SearchView) activity.findViewById(R.id.search_view)).setQuery("笔记", false);
+        layoutForMotion(root);
+        assertEquals(1, list.getCount());
+        assertEquals("com.example.notes", AppListAdapter.boundPackage(list.getChildAt(0)));
+        assertEquals(oldTop, list.getChildAt(0).getTop() + list.getChildAt(0).getTranslationY(), 1f);
+        settleMotion();
+        assertEquals(0f, list.getChildAt(0).getTranslationY(), 0.01f);
+    }
+
+    private void layoutForMotion(View root) {
+        root.measure(View.MeasureSpec.makeMeasureSpec(412, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(892, View.MeasureSpec.EXACTLY));
+        root.layout(0, 0, 412, 892);
+        root.getViewTreeObserver().dispatchOnPreDraw();
     }
 
     @Test public void reusedRowsSnapToTheirOwnSwitchState() throws Exception {
@@ -206,6 +238,7 @@ public class ManagementUiTest {
         assertTrue(menu.findViewById(R.id.menu_fcm_only).createAccessibilityNodeInfo().isCheckable());
         assertFalse(menu.findViewById(R.id.menu_fcm_only).createAccessibilityNodeInfo().isChecked());
         menu.findViewById(R.id.menu_fcm_only).performClick();
+        settleMotion();
         assertTrue(activity.getSharedPreferences("ui_settings", Context.MODE_PRIVATE)
                 .getBoolean("only_fcm", false));
         assertEquals(2, ((AppListAdapter) field("adapter").get(activity)).getCount());
@@ -215,6 +248,7 @@ public class ManagementUiTest {
                 .findViewById(R.id.menu_fcm_only).createAccessibilityNodeInfo().isChecked());
         Shadows.shadowOf(activity.getApplication()).getLatestPopupWindow().getContentView()
                 .findViewById(R.id.menu_system_apps).performClick();
+        settleMotion();
         assertEquals(3, ((AppListAdapter) field("adapter").get(activity)).getCount());
     }
 
@@ -246,8 +280,9 @@ public class ManagementUiTest {
         activity.findViewById(R.id.more).performClick();
         Shadows.shadowOf(activity.getApplication()).getLatestPopupWindow().getContentView()
                 .findViewById(R.id.menu_fcm_only).performClick();
+        settleMotion();
         activity.findViewById(R.id.more).performClick();
-        Shadows.shadowOf(Looper.getMainLooper()).idle();
+        settleMotion();
         android.widget.PopupWindow popup = Shadows.shadowOf(activity.getApplication()).getLatestPopupWindow();
         View menu = popup.getContentView().getRootView();
         int width = popup.getWidth();
@@ -324,5 +359,110 @@ public class ManagementUiTest {
         Method method = MainActivity.class.getDeclaredMethod(name);
         method.setAccessible(true);
         method.invoke(activity);
+    }
+
+    private void awaitWrites() throws Exception {
+        Shadows.shadowOf(Looper.getMainLooper()).idle();
+        ((ExecutorService) field("policyWriter").get(activity)).submit(() -> { }).get(5, TimeUnit.SECONDS);
+        Shadows.shadowOf(Looper.getMainLooper()).idle();
+    }
+
+    private void settleMotion() {
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(600));
+    }
+
+    @Test public void slowFailedWriteDoesNotBlockSelectionAndRestoresConfirmedPolicy() throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        SharedPreferences blocked = mock(SharedPreferences.class);
+        SharedPreferences.Editor editor = mock(SharedPreferences.Editor.class, RETURNS_SELF);
+        when(blocked.edit()).thenReturn(editor);
+        when(editor.commit()).thenAnswer(invocation -> {
+            assertNotSame(Looper.getMainLooper().getThread(), Thread.currentThread());
+            started.countDown();
+            assertTrue(release.await(5, TimeUnit.SECONDS));
+            return false;
+        });
+        when(((XposedService) field("xposedService").get(activity))
+                .getRemotePreferences(Prefs.GROUP_CONFIG)).thenReturn(blocked);
+        AppListAdapter adapter = (AppListAdapter) field("adapter").get(activity);
+        View row = adapter.getView(2, null, activity.findViewById(R.id.app_list));
+        try {
+            row.findViewById(R.id.app_check).performClick();
+            assertTrue(started.await(2, TimeUnit.SECONDS));
+            assertEquals("com.example.notes", adapter.getItem(0).packageName);
+            assertTrue(adapter.getItem(0).checked);
+        } finally { release.countDown(); }
+        awaitWrites();
+        assertEquals("org.telegram.messenger", adapter.getItem(0).packageName);
+        for (AppListAdapter.AppEntry app : apps()) assertFalse(app.checked);
+        assertEquals(activity.getString(R.string.save_failed), ShadowToast.getTextOfLatestToast());
+    }
+
+    @Test public void rapidSelectionsPersistInOrderWithoutLosingEarlierChoices() throws Exception {
+        AppListAdapter adapter = (AppListAdapter) field("adapter").get(activity);
+        View notes = adapter.getView(2, null, activity.findViewById(R.id.app_list));
+        notes.findViewById(R.id.app_check).performClick();
+        View telegram = adapter.getView(1, null, activity.findViewById(R.id.app_list));
+        telegram.findViewById(R.id.app_check).performClick();
+        telegram.findViewById(R.id.app_check).performClick();
+        awaitWrites();
+        assertEquals(Set.of("com.example.notes"), Prefs.readAllowlist(prefs));
+        assertEquals("com.example.notes", adapter.getItem(0).packageName);
+    }
+
+    @Test public void menuUsesOneAnimationAndDoesNotScrollItsAnchor() {
+        int before = activity.findViewById(R.id.header).getTop();
+        activity.findViewById(R.id.more).performClick();
+        android.widget.PopupWindow popup = Shadows.shadowOf(activity.getApplication()).getLatestPopupWindow();
+        assertFalse(popup.isAboveAnchor());
+        assertEquals(0, popup.getAnimationStyle());
+        assertNull(popup.getEnterTransition());
+        assertNull(popup.getExitTransition());
+        settleMotion();
+        assertEquals(before, activity.findViewById(R.id.header).getTop());
+        popup.dismiss();
+        assertTrue("Window must stay attached during exit", popup.isShowing());
+        settleMotion();
+        assertFalse(popup.isShowing());
+    }
+
+    @Test public void aboutSheetStaysAttachedDuringDragDismissal() throws Exception {
+        invoke("showAbout");
+        AlertDialog dialog = ShadowAlertDialog.getLatestAlertDialog();
+        View panel = dialog.getWindow().getDecorView();
+        panel.measure(View.MeasureSpec.makeMeasureSpec(388, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(700, View.MeasureSpec.AT_MOST));
+        panel.layout(0, 0, 388, panel.getMeasuredHeight());
+        panel.getViewTreeObserver().dispatchOnPreDraw();
+        settleMotion();
+        assertEquals(0f, panel.getTranslationY(), 0.01f);
+        long now = android.os.SystemClock.uptimeMillis();
+        dispatchDrag(dialog, now, now, android.view.MotionEvent.ACTION_DOWN, 30);
+        dispatchDrag(dialog, now, now + 40, android.view.MotionEvent.ACTION_MOVE, 150);
+        assertTrue(panel.getTranslationY() > 0);
+        dispatchDrag(dialog, now, now + 80, android.view.MotionEvent.ACTION_UP, 150);
+        assertTrue(dialog.isShowing());
+        settleMotion();
+        assertFalse(dialog.isShowing());
+    }
+
+    private void dispatchDrag(AlertDialog dialog, long down, long time, int action, float y) {
+        android.view.MotionEvent event = android.view.MotionEvent.obtain(down, time, action, 40, y, 0);
+        dialog.dispatchTouchEvent(event);
+        event.recycle();
+    }
+
+    @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    public void renderAboutSheet() throws Exception {
+        invoke("showAbout");
+        View panel = ShadowAlertDialog.getLatestAlertDialog().getWindow().getDecorView();
+        panel.measure(View.MeasureSpec.makeMeasureSpec(388, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(760, View.MeasureSpec.AT_MOST));
+        panel.layout(0, 0, 388, panel.getMeasuredHeight());
+        panel.getViewTreeObserver().dispatchOnPreDraw();
+        settleMotion();
+        saveRender(panel, 388, panel.getMeasuredHeight(), "management-about.png");
     }
 }

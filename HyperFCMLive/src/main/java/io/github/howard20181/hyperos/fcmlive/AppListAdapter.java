@@ -13,6 +13,9 @@ import android.widget.ImageView;
 import android.widget.TextView;
 
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.WeakHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -27,6 +30,7 @@ public class AppListAdapter extends BaseAdapter {
         public final String label;
         public Drawable icon;   // loaded lazily, null until resolved
         public volatile boolean iconLoading;
+        public boolean iconLoaded;
         public boolean checked;
         public boolean automaticallyAllowed;
         public boolean systemApp;
@@ -45,6 +49,8 @@ public class AppListAdapter extends BaseAdapter {
     private final ExecutorService iconLoader = Executors.newFixedThreadPool(4);
     private final List<AppEntry> apps;
     private final OnCheckedChangeListener listener;
+    private final Map<String, Long> identities = new HashMap<>();
+    private final Map<ViewHolder, Boolean> holders = new WeakHashMap<>();
 
     public AppListAdapter(Context context, List<AppEntry> apps, OnCheckedChangeListener listener) {
         this.inflater = LayoutInflater.from(context);
@@ -65,7 +71,13 @@ public class AppListAdapter extends BaseAdapter {
 
     @Override
     public long getItemId(int position) {
-        return position;
+        return identities.computeIfAbsent(getItem(position).packageName, ignored -> (long) identities.size());
+    }
+
+    @Override public boolean hasStableIds() { return true; }
+
+    static String boundPackage(View row) {
+        return row.getTag() instanceof ViewHolder holder ? holder.boundPackage : null;
     }
 
     @Override
@@ -79,6 +91,7 @@ public class AppListAdapter extends BaseAdapter {
             holder.pkg = convertView.findViewById(R.id.app_pkg);
             holder.check = convertView.findViewById(R.id.app_check);
             convertView.setTag(holder);
+            holders.put(holder, Boolean.TRUE);
         } else {
             holder = (ViewHolder) convertView.getTag();
         }
@@ -95,6 +108,8 @@ public class AppListAdapter extends BaseAdapter {
         holder.check.setOnCheckedChangeListener(null);
         holder.check.setChecked(app.checked);
         if (!app.packageName.equals(holder.boundPackage)) {
+            convertView.animate().cancel();
+            convertView.setTranslationY(0);
             holder.check.jumpDrawablesToCurrentState();
         }
         holder.boundPackage = app.packageName;
@@ -124,9 +139,9 @@ public class AppListAdapter extends BaseAdapter {
         mainHandler.removeCallbacksAndMessages(null);
     }
 
-    /** Load an app icon off the main thread, then refresh the row once ready. */
+    /** Update only holders still bound to this package; icon loads never rebuild the list. */
     private void loadIcon(final AppEntry app) {
-        if (app.iconLoading || iconLoader.isShutdown()) {
+        if (app.iconLoaded || app.iconLoading || iconLoader.isShutdown()) {
             return;
         }
         app.iconLoading = true;
@@ -141,8 +156,13 @@ public class AppListAdapter extends BaseAdapter {
             mainHandler.post(() -> {
                 if (iconLoader.isShutdown()) return;
                 app.iconLoading = false;
+                app.iconLoaded = true;
                 app.icon = loaded;
-                if (loaded != null) notifyDataSetChanged();
+                if (loaded != null) {
+                    for (ViewHolder holder : holders.keySet()) {
+                        if (app.packageName.equals(holder.boundPackage)) holder.icon.setImageDrawable(loaded);
+                    }
+                }
             });
         });
     }

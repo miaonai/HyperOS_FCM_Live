@@ -9,7 +9,6 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
-import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
@@ -46,7 +45,12 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     private final List<AppListAdapter.AppEntry> allApps = new ArrayList<>();
     private final List<AppListAdapter.AppEntry> filteredApps = new ArrayList<>();
     private final ExecutorService appLoader = Executors.newSingleThreadExecutor();
+    private final ExecutorService policyWriter = Executors.newSingleThreadExecutor();
     private Set<String> allowlist = new HashSet<>();
+    private Set<String> confirmedAllowlist = new HashSet<>();
+    private boolean confirmedAutoFcm;
+    private long policyRevision;
+    private int pendingWrites;
     private AppListAdapter adapter;
     private SearchView searchView;
     private SharedPreferences uiSettings;
@@ -58,8 +62,8 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     private int bottomInset;
     private XposedService xposedService;
     private ManagementMenu menu;
+    private ManagementSheet sheet;
     private OnBackInvokedCallback searchBackCallback;
-    private final Runnable reorderApps = this::filterApps;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -73,13 +77,16 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         adapter = new AppListAdapter(this, filteredApps, (pkg, checked) -> {
             Set<String> updated = new HashSet<>(allowlist);
             if (checked) updated.add(pkg); else updated.remove(pkg);
-            savePolicy(updated, autoFcm, true);
+            savePolicy(updated, autoFcm);
         });
         ListView list = findViewById(R.id.app_list);
         list.setAdapter(adapter);
         list.setOnScrollListener(new AbsListView.OnScrollListener() {
             @Override public void onScrollStateChanged(AbsListView view, int state) {
-                if (state == SCROLL_STATE_TOUCH_SCROLL) hideKeyboard();
+                if (state == SCROLL_STATE_TOUCH_SCROLL) {
+                    ((AnimatedAppList) list).stopItemAnimations();
+                    hideKeyboard();
+                }
             }
             @Override public void onScroll(AbsListView view, int first, int visible, int total) {
                 findViewById(R.id.root).invalidate();
@@ -215,12 +222,14 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
 
     @Override
     protected void onDestroy() {
-        findViewById(R.id.root).removeCallbacks(reorderApps);
         if (menu != null) menu.dismiss();
+        if (sheet != null) sheet.dismissImmediately();
         if (Build.VERSION.SDK_INT >= 33 && searchBackCallback != null) {
             getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(searchBackCallback);
         }
         appLoader.shutdownNow();
+        // Already accepted writes finish in order even if the activity is leaving.
+        policyWriter.shutdown();
         adapter.close();
         super.onDestroy();
     }
@@ -251,10 +260,8 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     }
 
     private void confirmClearAll() {
-        showDialog(new AlertDialog.Builder(this).setTitle(R.string.clear_all)
-                .setMessage(R.string.confirm_clear)
-                .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton(R.string.clear_all, (dialog, which) -> savePolicy(new HashSet<>(), false)));
+        showSheet(R.string.clear_all, getString(R.string.confirm_clear), R.string.clear_all,
+                () -> savePolicy(new HashSet<>(), false), true);
     }
 
     private void confirmSelectFcm() {
@@ -265,30 +272,26 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
             Toast.makeText(this, R.string.no_fcm_apps, Toast.LENGTH_SHORT).show();
             return;
         }
-        showDialog(new AlertDialog.Builder(this).setTitle(R.string.select_all)
-                .setMessage(getResources().getQuantityString(R.plurals.confirm_select_fcm,
-                        detected.size(), detected.size()))
-                .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton(R.string.select_all, (dialog, which) -> {
+        showSheet(R.string.select_all, getResources().getQuantityString(R.plurals.confirm_select_fcm,
+                        detected.size(), detected.size()), R.string.select_all, () -> {
                     Set<String> updated = new HashSet<>(allowlist);
                     updated.addAll(detected);
                     savePolicy(updated, autoFcm);
-                }));
+                }, true);
     }
 
-    private void showDialog(AlertDialog.Builder builder) {
-        AlertDialog dialog = builder.create();
-        dialog.setOnShowListener(ignored -> {
-            GradientDrawable background = new GradientDrawable();
-            background.setColor(getColor(R.color.surface));
-            background.setCornerRadius(dp(28));
-            if (dialog.getWindow() != null) {
-                dialog.getWindow().setBackgroundDrawable(background);
-                dialog.getWindow().setDimAmount(0.25f);
-            }
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setAllCaps(false);
-            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setAllCaps(false);
+    private void showSheet(int title, CharSequence message, int positive, Runnable action, boolean confirm) {
+        if (sheet != null) sheet.dismissImmediately();
+        ManagementSheet dialog = new ManagementSheet(this);
+        sheet = dialog;
+        dialog.setTitle(title);
+        dialog.setMessage(message);
+        dialog.setButton(AlertDialog.BUTTON_POSITIVE, getString(positive), (ignored, which) -> {
+            if (action != null) action.run();
         });
+        if (confirm) dialog.setButton(AlertDialog.BUTTON_NEGATIVE, getString(android.R.string.cancel),
+                (ignored, which) -> { });
+        dialog.setOnDismissListener(ignored -> { if (sheet == dialog) sheet = null; });
         dialog.show();
     }
 
@@ -308,24 +311,25 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         } catch (PackageManager.NameNotFoundException exception) {
             version = getString(R.string.version_unknown);
         }
-        showDialog(new AlertDialog.Builder(this).setTitle(R.string.about)
-                .setMessage(getString(R.string.about_message, version))
-                .setPositiveButton(android.R.string.ok, null));
+        showSheet(R.string.about, getString(R.string.about_message, version), android.R.string.ok, null, false);
     }
 
     private void filterApps() {
-        findViewById(R.id.root).removeCallbacks(reorderApps);
         String query = searchView.getQuery().toString().trim().toLowerCase(Locale.ROOT);
-        filteredApps.clear();
+        List<AppListAdapter.AppEntry> next = new ArrayList<>();
         for (AppListAdapter.AppEntry app : allApps) {
             if (!showSystemApps && app.systemApp) continue;
             if (onlyFcm && !app.containsFcm) continue;
             if (app.label.toLowerCase(Locale.ROOT).contains(query)
-                    || app.packageName.toLowerCase(Locale.ROOT).contains(query)) filteredApps.add(app);
+                    || app.packageName.toLowerCase(Locale.ROOT).contains(query)) next.add(app);
         }
         // Stable sort preserves FCM/name order within each enabled/disabled group.
-        filteredApps.sort((a, b) -> Boolean.compare(b.checked, a.checked));
-        adapter.notifyDataSetChanged();
+        next.sort((a, b) -> Boolean.compare(b.checked, a.checked));
+        ((AnimatedAppList) findViewById(R.id.app_list)).changeItems(() -> {
+            filteredApps.clear();
+            filteredApps.addAll(next);
+            adapter.notifyDataSetChanged();
+        });
         TextView empty = findViewById(R.id.empty);
         empty.setText(loadFailed ? R.string.load_failed : loading ? R.string.loading_apps : R.string.no_apps);
         findViewById(R.id.empty_state).setVisibility(filteredApps.isEmpty() ? View.VISIBLE : View.GONE);
@@ -334,10 +338,6 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     }
 
     private void refreshSelection() {
-        refreshSelection(false);
-    }
-
-    private void refreshSelection(boolean deferReorder) {
         Set<String> detected = new HashSet<>();
         for (AppListAdapter.AppEntry app : allApps) {
             if (app.containsFcm) detected.add(app.packageName);
@@ -347,21 +347,18 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
             app.automaticallyAllowed = autoFcm && app.containsFcm;
             app.checked = effective.contains(app.packageName);
         }
-        if (deferReorder) {
-            // Let the clicked thumb finish moving before moving its row to a different group.
-            adapter.notifyDataSetChanged();
-            View root = findViewById(R.id.root);
-            root.removeCallbacks(reorderApps);
-            root.postDelayed(reorderApps, CapsuleSwitch.SETTLE_DURATION_MS);
-        } else filterApps();
+        filterApps();
     }
 
     private void readPolicy() {
+        if (pendingWrites != 0) return;
         SharedPreferences prefs = remotePrefs();
         if (prefs == null) return;
         try {
             allowlist = Prefs.readAllowlist(prefs);
             autoFcm = Prefs.readAutoFcm(prefs);
+            confirmedAllowlist = new HashSet<>(allowlist);
+            confirmedAutoFcm = autoFcm;
             refreshSelection();
         } catch (RuntimeException ignored) {
             // Keep the last known state if the service disappears during the read.
@@ -396,24 +393,43 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     }
 
     private void savePolicy(Set<String> updated, boolean automatic) {
-        savePolicy(updated, automatic, false);
-    }
-
-    private void savePolicy(Set<String> updated, boolean automatic, boolean deferReorder) {
-        SharedPreferences prefs = remotePrefs();
-        if (prefs == null) {
+        XposedService service = xposedService;
+        if (service == null) {
             Toast.makeText(this, R.string.service_unavailable, Toast.LENGTH_LONG).show();
-        } else {
-            try {
-                if (Prefs.writePolicy(this, prefs, updated, automatic)) {
-                    allowlist = new HashSet<>(updated);
-                    autoFcm = automatic;
-                } else Toast.makeText(this, R.string.save_failed, Toast.LENGTH_LONG).show();
-            } catch (RuntimeException exception) {
-                Toast.makeText(this, R.string.save_failed, Toast.LENGTH_LONG).show();
-            }
+            refreshSelection();
+            return;
         }
-        refreshSelection(deferReorder);
+        Set<String> snapshot = new HashSet<>(updated);
+        allowlist = snapshot;
+        autoFcm = automatic;
+        long revision = ++policyRevision;
+        pendingWrites++;
+        refreshSelection();
+        android.content.Context appContext = getApplicationContext();
+        policyWriter.execute(() -> {
+            boolean saved;
+            try {
+                saved = Prefs.writePolicy(appContext, service.getRemotePreferences(Prefs.GROUP_CONFIG),
+                        snapshot, automatic);
+            } catch (RuntimeException exception) {
+                saved = false;
+            }
+            boolean success = saved;
+            runOnUiThread(() -> {
+                if (isDestroyed()) return;
+                pendingWrites--;
+                if (success) {
+                    confirmedAllowlist = snapshot;
+                    confirmedAutoFcm = automatic;
+                } else if (revision == policyRevision) {
+                    // An old failed write must never undo a newer selection.
+                    allowlist = new HashSet<>(confirmedAllowlist);
+                    autoFcm = confirmedAutoFcm;
+                    refreshSelection();
+                    Toast.makeText(this, R.string.save_failed, Toast.LENGTH_LONG).show();
+                }
+            });
+        });
     }
 
     private void loadApps() {

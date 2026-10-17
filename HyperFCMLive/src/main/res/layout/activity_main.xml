@@ -3,7 +3,7 @@
     android:id="@+id/root"
     android:layout_width="match_parent" android:layout_height="match_parent"
     android:background="@color/background">
-    <ListView android:id="@+id/app_list" android:layout_width="match_parent"
+    <io.github.howard20181.hyperos.fcmlive.AnimatedAppList android:id="@+id/app_list" android:layout_width="match_parent"
         android:layout_height="match_parent" android:paddingHorizontal="16dp"
         android:clipToPadding="false" android:divider="@android:color/transparent"
         android:dividerHeight="8dp" android:scrollbarStyle="outsideOverlay"

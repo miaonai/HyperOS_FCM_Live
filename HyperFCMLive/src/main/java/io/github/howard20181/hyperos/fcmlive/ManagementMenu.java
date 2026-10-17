@@ -1,6 +1,11 @@
 package io.github.howard20181.hyperos.fcmlive;
 
 import android.content.Context;
+import android.animation.ValueAnimator;
+import android.graphics.Color;
+import android.graphics.Rect;
+import android.graphics.drawable.ColorDrawable;
+import android.os.Build;
 import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
 import android.view.View;
@@ -16,23 +21,29 @@ import android.widget.TextView;
 final class ManagementMenu {
     private final Context context;
     private final LinearLayout items;
-    private final PopupWindow popup;
+    private final MenuWindow popup;
+    private final ScrollView scroll;
 
     ManagementMenu(Context context) {
         this.context = context;
         items = new LinearLayout(context);
         items.setOrientation(LinearLayout.VERTICAL);
         items.setPadding(dp(8), dp(8), dp(8), dp(8));
-        ScrollView scroll = new ScrollView(context);
+        scroll = new ScrollView(context);
         scroll.setFillViewport(true);
         scroll.addView(items);
-        popup = new PopupWindow(scroll, ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, true);
+        popup = new MenuWindow(scroll);
         GradientDrawable background = new GradientDrawable();
         background.setColor(context.getColor(R.color.surface));
         background.setCornerRadius(dp(24));
-        popup.setBackgroundDrawable(background);
-        popup.setElevation(dp(12));
+        scroll.setBackground(background);
+        scroll.setClipToOutline(true);
+        popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        popup.setElevation(dp(6));
+        popup.setAnimationStyle(0);
+        popup.setEnterTransition(null);
+        popup.setExitTransition(null);
+        if (Build.VERSION.SDK_INT >= 29) popup.setIsLaidOutInScreen(true);
         popup.setOutsideTouchable(true);
         popup.setInputMethodMode(PopupWindow.INPUT_METHOD_NOT_NEEDED);
     }
@@ -80,7 +91,7 @@ final class ManagementMenu {
         row.setEnabled(enabled);
         row.setAlpha(enabled ? 1 : 0.4f);
         row.setFocusable(true);
-        row.setOnClickListener(view -> { popup.dismiss(); action.run(); });
+        row.setOnClickListener(view -> popup.dismissThen(action));
         items.addView(row, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
         return row;
@@ -95,10 +106,69 @@ final class ManagementMenu {
                 View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
         popup.setWidth(width);
         popup.setHeight(Math.min(items.getMeasuredHeight(), (int) (anchor.getRootView().getHeight() * 0.72f)));
-        popup.showAsDropDown(anchor, 0, dp(6), Gravity.END);
+        Rect bounds = new Rect();
+        anchor.getWindowVisibleDisplayFrame(bounds);
+        int[] location = new int[2];
+        anchor.getLocationOnScreen(location);
+        int x = anchor.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL
+                ? location[0] : location[0] + anchor.getWidth() - width;
+        x = Math.max(bounds.left + dp(16), Math.min(x, bounds.right - width - dp(16)));
+        int y = Math.max(bounds.top + dp(8), Math.min(location[1] + anchor.getHeight() + dp(6),
+                bounds.bottom - popup.getHeight() - dp(8)));
+        if (Build.VERSION.SDK_INT < 29) {
+            int[] windowLocation = new int[2];
+            anchor.getLocationInWindow(windowLocation);
+            x -= location[0] - windowLocation[0];
+            y -= location[1] - windowLocation[1];
+        }
+        // A fixed screen position avoids drop-down anchor scrolling/flipping during IME dismissal.
+        boolean animate = ValueAnimator.areAnimatorsEnabled();
+        scroll.setAlpha(animate ? 0 : 1);
+        scroll.setTranslationY(animate ? -dp(8) : 0);
+        popup.showAtLocation(anchor, Gravity.TOP | Gravity.LEFT, x, y);
+        if (animate) scroll.animate().alpha(1).translationY(0).setDuration(180)
+                .setInterpolator(MotionCurves.PLACEMENT).start();
     }
 
-    void dismiss() { popup.dismiss(); }
+    void dismiss() { popup.dismissImmediately(); }
+
+    /** Keep the surface attached until exit completes, including outside-tap and Back dismissal. */
+    private final class MenuWindow extends PopupWindow {
+        private boolean closing;
+        private Runnable afterDismiss;
+
+        MenuWindow(View content) {
+            super(content, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, true);
+        }
+
+        void dismissThen(Runnable action) {
+            if (closing) return;
+            afterDismiss = action;
+            dismiss();
+        }
+
+        @Override public void dismiss() {
+            if (closing || !isShowing()) return;
+            closing = true;
+            scroll.animate().cancel();
+            if (!ValueAnimator.areAnimatorsEnabled()) { finishDismiss(); return; }
+            scroll.animate().alpha(0).translationY(-dp(6)).setDuration(120)
+                    .setInterpolator(MotionCurves.EXIT).withEndAction(this::finishDismiss).start();
+        }
+
+        private void finishDismiss() {
+            super.dismiss();
+            Runnable action = afterDismiss;
+            afterDismiss = null;
+            if (action != null) action.run();
+        }
+
+        void dismissImmediately() {
+            afterDismiss = null;
+            scroll.animate().withEndAction(null).cancel();
+            super.dismiss();
+        }
+    }
 
     private int dp(int value) { return Math.round(value * context.getResources().getDisplayMetrics().density); }
 }
