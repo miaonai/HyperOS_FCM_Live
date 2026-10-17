@@ -214,6 +214,52 @@ public class ManagementUiTest {
         root.getViewTreeObserver().dispatchOnPreDraw();
     }
 
+    @Test public void newlyRevealedAppsStayBelowExistingRowsDuringPlacement() throws Exception {
+        field("onlyFcm").setBoolean(activity, true);
+        invoke("filterApps");
+        View root = activity.findViewById(R.id.root);
+        layoutForMotion(root);
+        AnimatedAppList list = activity.findViewById(R.id.app_list);
+        field("onlyFcm").setBoolean(activity, false);
+        invoke("filterApps");
+        layoutForMotion(root);
+        // Notes is inserted before Mail; Mail must cover it until it moves down.
+        int notesDraw = -1, mailDraw = -1;
+        for (int draw = 0; draw < list.getChildCount(); draw++) {
+            String pkg = AppListAdapter.boundPackage(list.getChildAt(
+                    list.getChildDrawingOrder(list.getChildCount(), draw)));
+            if ("com.example.notes".equals(pkg)) notesDraw = draw;
+            if ("com.example.mail".equals(pkg)) mailDraw = draw;
+        }
+        assertTrue("New Notes must draw before existing Mail", notesDraw < mailDraw);
+    }
+
+    @Test public void managementListHasNoScrollbar() {
+        assertFalse(activity.findViewById(R.id.app_list).isVerticalScrollBarEnabled());
+    }
+
+    @Test @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    public void headerAndListShareOneContentRecordingPerFrame() {
+        FrostedLayout root = new FrostedLayout(activity, null);
+        int[] recordings = {0};
+        View source = new View(activity) {
+            @Override public void draw(Canvas canvas) { recordings[0]++; super.draw(canvas); }
+        };
+        source.setId(R.id.app_list);
+        root.addView(source, new android.widget.FrameLayout.LayoutParams(-1, -1));
+        View header = new View(activity);
+        header.setId(R.id.header);
+        root.addView(header, new android.widget.FrameLayout.LayoutParams(-1, 88));
+        layoutForMotion(root);
+        android.graphics.RenderNode frame = new android.graphics.RenderNode("header regression");
+        frame.setPosition(0, 0, 412, 892);
+        Canvas canvas = frame.beginRecording(412, 892);
+        root.draw(canvas);
+        frame.endRecording();
+        assertEquals("One list recording feeds both sharp content and header blur", 1, recordings[0]);
+        frame.discardDisplayList();
+    }
+
     @Test public void reusedRowsSnapToTheirOwnSwitchState() throws Exception {
         prefs.edit().putStringSet(Prefs.KEY_ALLOWLIST, Set.of("org.telegram.messenger")).commit();
         invoke("readPolicy");
