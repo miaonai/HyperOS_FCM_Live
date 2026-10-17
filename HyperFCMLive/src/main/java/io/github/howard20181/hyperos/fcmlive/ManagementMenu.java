@@ -97,6 +97,7 @@ final class ManagementMenu {
         return row;
     }
 
+    @android.annotation.SuppressLint("RtlHardcoded") // x is already an absolute, RTL-aware screen coordinate.
     void show(View anchor) {
         int availableWidth = Math.max(1, anchor.getRootView().getWidth() - dp(32));
         items.measure(View.MeasureSpec.makeMeasureSpec(availableWidth, View.MeasureSpec.AT_MOST),

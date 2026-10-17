@@ -445,6 +445,8 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                     refreshSelection();
                     Toast.makeText(this, R.string.save_failed, Toast.LENGTH_LONG).show();
                 }
+                // A reconnected service may have deferred its read while this write was pending.
+                if (pendingWrites == 0 && !policyReady && xposedService != null) readPolicy();
             });
         });
     }

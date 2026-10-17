@@ -393,8 +393,15 @@ public class ManagementUiTest {
             assertTrue(started.await(2, TimeUnit.SECONDS));
             assertEquals("com.example.notes", adapter.getItem(0).packageName);
             assertTrue(adapter.getItem(0).checked);
+            // A service rebind during the pending save must retry its deferred reload afterwards.
+            field("policyReady").setBoolean(activity, false);
+            Method read = MainActivity.class.getDeclaredMethod("readPolicy");
+            read.setAccessible(true);
+            read.invoke(activity);
         } finally { release.countDown(); }
         awaitWrites();
+        awaitWrites();
+        assertTrue(field("policyReady").getBoolean(activity));
         assertEquals("org.telegram.messenger", adapter.getItem(0).packageName);
         for (AppListAdapter.AppEntry app : apps()) assertFalse(app.checked);
         assertEquals(activity.getString(R.string.save_failed), ShadowToast.getTextOfLatestToast());
