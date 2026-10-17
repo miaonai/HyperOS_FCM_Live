@@ -189,12 +189,13 @@ public class ManagementUiTest {
         layoutForMotion(root);
         AnimatedAppList list = activity.findViewById(R.id.app_list);
         float oldTop = list.getChildAt(2).getTop();
-        prefs.edit().putStringSet(Prefs.KEY_ALLOWLIST, Set.of("com.example.notes")).commit();
-        invoke("readPolicy");
+        // Exercise the actual tap, without draining animation frames via the asynchronous read helper.
+        list.getChildAt(2).findViewById(R.id.app_check).performClick();
         layoutForMotion(root);
         View notes = list.getChildAt(0);
         assertEquals("com.example.notes", AppListAdapter.boundPackage(notes));
-        assertTrue(notes.getTranslationY() > 0);
+        assertTrue("Moved row must start at its old position: oldTop=" + oldTop
+                + ", newTop=" + notes.getTop(), notes.getTranslationY() > 0);
         assertEquals(oldTop, notes.getTop() + notes.getTranslationY(), 1f);
         ((SearchView) activity.findViewById(R.id.search_view)).setQuery("笔记", false);
         layoutForMotion(root);
@@ -203,6 +204,7 @@ public class ManagementUiTest {
         assertEquals(oldTop, list.getChildAt(0).getTop() + list.getChildAt(0).getTranslationY(), 1f);
         settleMotion();
         assertEquals(0f, list.getChildAt(0).getTranslationY(), 0.01f);
+        awaitWrites();
     }
 
     private void layoutForMotion(View root) {
@@ -493,6 +495,9 @@ public class ManagementUiTest {
     @Test public void scrolledMessageDoesNotBlockDraggingTheSheetTitle() throws Exception {
         invoke("showAbout");
         AlertDialog dialog = ShadowAlertDialog.getLatestAlertDialog();
+        dialog.setMessage(activity.getString(R.string.about_message, "test").repeat(10));
+        // Constrain the window itself, so a scheduled traversal cannot undo the test's short viewport.
+        dialog.getWindow().setLayout(388, 220);
         View panel = dialog.getWindow().getDecorView();
         panel.measure(View.MeasureSpec.makeMeasureSpec(388, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(220, View.MeasureSpec.EXACTLY));
