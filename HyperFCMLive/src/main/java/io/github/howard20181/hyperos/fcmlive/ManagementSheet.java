@@ -84,6 +84,7 @@ final class ManagementSheet extends AlertDialog {
         TextView title = titleId == 0 ? null : getWindow().findViewById(titleId);
         if (title != null) {
             title.setGravity(Gravity.CENTER);
+            title.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
             ViewGroup.LayoutParams titleParams = title.getLayoutParams();
             titleParams.width = ViewGroup.LayoutParams.MATCH_PARENT;
             title.setLayoutParams(titleParams);

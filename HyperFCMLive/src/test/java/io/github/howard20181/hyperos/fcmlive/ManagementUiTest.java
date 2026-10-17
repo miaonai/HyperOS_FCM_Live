@@ -198,6 +198,7 @@ public class ManagementUiTest {
         int titleId = activity.getResources().getIdentifier("alertTitle", "id", "android");
         android.widget.TextView title = dialog.findViewById(titleId);
         assertEquals(android.view.Gravity.CENTER, title.getGravity());
+        assertEquals(View.TEXT_ALIGNMENT_CENTER, title.getTextAlignment());
         View titleParent = (View) title.getParent();
         assertEquals(titleParent.getWidth() - titleParent.getPaddingLeft() - titleParent.getPaddingRight(),
                 title.getWidth());
