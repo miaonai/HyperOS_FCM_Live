@@ -45,12 +45,19 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     private final List<AppListAdapter.AppEntry> allApps = new ArrayList<>();
     private final List<AppListAdapter.AppEntry> filteredApps = new ArrayList<>();
     private final ExecutorService appLoader = Executors.newSingleThreadExecutor();
-    private final ExecutorService policyWriter = Executors.newSingleThreadExecutor();
+    // Shared across activity recreation: a new page reads only after older accepted writes finish.
+    private static final ExecutorService policyWriter = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "fcm-policy");
+        thread.setDaemon(true);
+        return thread;
+    });
     private Set<String> allowlist = new HashSet<>();
     private Set<String> confirmedAllowlist = new HashSet<>();
     private boolean confirmedAutoFcm;
     private long policyRevision;
     private int pendingWrites;
+    private boolean policyReady;
+    private long policyReadRevision;
     private AppListAdapter adapter;
     private SearchView searchView;
     private SharedPreferences uiSettings;
@@ -79,6 +86,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
             if (checked) updated.add(pkg); else updated.remove(pkg);
             savePolicy(updated, autoFcm);
         });
+        adapter.setChangesEnabled(false);
         ListView list = findViewById(R.id.app_list);
         list.setAdapter(adapter);
         list.setOnScrollListener(new AbsListView.OnScrollListener() {
@@ -228,8 +236,6 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
             getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(searchBackCallback);
         }
         appLoader.shutdownNow();
-        // Already accepted writes finish in order even if the activity is leaving.
-        policyWriter.shutdown();
         adapter.close();
         super.onDestroy();
     }
@@ -251,8 +257,8 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
             uiSettings.edit().putBoolean(SHOW_SYSTEM_APPS, showSystemApps).apply();
             filterApps();
         });
-        menu.action(R.id.menu_clear_all, R.string.clear_all, true, this::confirmClearAll);
-        menu.action(R.id.menu_select_fcm, R.string.select_all, !loading && !loadFailed, this::confirmSelectFcm);
+        menu.action(R.id.menu_clear_all, R.string.clear_all, policyReady, this::confirmClearAll);
+        menu.action(R.id.menu_select_fcm, R.string.select_all, policyReady && !loading && !loadFailed, this::confirmSelectFcm);
         menu.toggle(R.id.menu_auto_fcm, R.string.auto_fcm, autoFcm, () -> savePolicy(allowlist, !autoFcm));
         menu.action(R.id.menu_diagnostics, R.string.open_diagnostics, true, this::openDiagnostics);
         menu.action(R.id.menu_about, R.string.about, true, this::showAbout);
@@ -352,17 +358,30 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
 
     private void readPolicy() {
         if (pendingWrites != 0) return;
-        SharedPreferences prefs = remotePrefs();
-        if (prefs == null) return;
-        try {
-            allowlist = Prefs.readAllowlist(prefs);
-            autoFcm = Prefs.readAutoFcm(prefs);
-            confirmedAllowlist = new HashSet<>(allowlist);
-            confirmedAutoFcm = autoFcm;
-            refreshSelection();
-        } catch (RuntimeException ignored) {
-            // Keep the last known state if the service disappears during the read.
-        }
+        policyReady = false;
+        adapter.setChangesEnabled(false);
+        XposedService service = xposedService;
+        if (service == null) return;
+        long revision = ++policyReadRevision;
+        policyWriter.execute(() -> {
+            try {
+                SharedPreferences prefs = service.getRemotePreferences(Prefs.GROUP_CONFIG);
+                Set<String> selected = Prefs.readAllowlist(prefs);
+                boolean automatic = Prefs.readAutoFcm(prefs);
+                runOnUiThread(() -> {
+                    if (isDestroyed() || service != xposedService || revision != policyReadRevision) return;
+                    allowlist = selected;
+                    autoFcm = automatic;
+                    confirmedAllowlist = new HashSet<>(selected);
+                    confirmedAutoFcm = automatic;
+                    policyReady = true;
+                    adapter.setChangesEnabled(true);
+                    refreshSelection();
+                });
+            } catch (RuntimeException ignored) {
+                // Keep the last known state; edits stay disabled until a successful reload.
+            }
+        });
     }
 
     private void initXposedService() {
@@ -377,7 +396,11 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                 }
                 @Override public void onServiceDied(@NonNull XposedService service) {
                     runOnUiThread(() -> {
-                        if (!isDestroyed() && xposedService == service) xposedService = null;
+                        if (!isDestroyed() && xposedService == service) {
+                            xposedService = null;
+                            policyReady = false;
+                            adapter.setChangesEnabled(false);
+                        }
                     });
                 }
             });
@@ -386,15 +409,9 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         }
     }
 
-    private SharedPreferences remotePrefs() {
-        if (xposedService == null) return null;
-        try { return xposedService.getRemotePreferences(Prefs.GROUP_CONFIG); }
-        catch (RuntimeException exception) { return null; }
-    }
-
     private void savePolicy(Set<String> updated, boolean automatic) {
         XposedService service = xposedService;
-        if (service == null) {
+        if (service == null || !policyReady) {
             Toast.makeText(this, R.string.service_unavailable, Toast.LENGTH_LONG).show();
             refreshSelection();
             return;

@@ -4,6 +4,7 @@ import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.Rect;
 import android.os.Build;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -54,8 +55,8 @@ final class ManagementSheet extends AlertDialog {
 
     @Override protected void onStart() {
         super.onStart();
-        getButton(BUTTON_POSITIVE).setAllCaps(false);
-        getButton(BUTTON_NEGATIVE).setAllCaps(false);
+        if (getButton(BUTTON_POSITIVE) != null) getButton(BUTTON_POSITIVE).setAllCaps(false);
+        if (getButton(BUTTON_NEGATIVE) != null) getButton(BUTTON_NEGATIVE).setAllCaps(false);
         View panel = getWindow().getDecorView();
         if (!ValueAnimator.areAnimatorsEnabled()) return;
         // Hide before the first frame; dimensions and background are fixed before show().
@@ -142,7 +143,10 @@ final class ManagementSheet extends AlertDialog {
     }
 
     private boolean canScrollUp(View view) {
-        if (view instanceof ScrollView && view.canScrollVertically(-1)) return true;
+        if (view instanceof ScrollView && view.canScrollVertically(-1)) {
+            Rect bounds = new Rect();
+            if (view.getGlobalVisibleRect(bounds) && bounds.contains((int) downX, (int) downY)) return true;
+        }
         if (view instanceof ViewGroup group) {
             for (int i = 0; i < group.getChildCount(); i++) if (canScrollUp(group.getChildAt(i))) return true;
         }

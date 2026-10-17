@@ -51,6 +51,14 @@ public class AppListAdapter extends BaseAdapter {
     private final OnCheckedChangeListener listener;
     private final Map<String, Long> identities = new HashMap<>();
     private final Map<ViewHolder, Boolean> holders = new WeakHashMap<>();
+    private boolean changesEnabled = true;
+
+    void setChangesEnabled(boolean enabled) {
+        changesEnabled = enabled;
+        for (ViewHolder holder : holders.keySet()) {
+            holder.check.setEnabled(enabled && !holder.automaticallyAllowed);
+        }
+    }
 
     public AppListAdapter(Context context, List<AppEntry> apps, OnCheckedChangeListener listener) {
         this.inflater = LayoutInflater.from(context);
@@ -113,7 +121,8 @@ public class AppListAdapter extends BaseAdapter {
             holder.check.jumpDrawablesToCurrentState();
         }
         holder.boundPackage = app.packageName;
-        holder.check.setEnabled(!app.automaticallyAllowed);
+        holder.automaticallyAllowed = app.automaticallyAllowed;
+        holder.check.setEnabled(changesEnabled && !app.automaticallyAllowed);
         holder.check.setAlpha(app.automaticallyAllowed ? 0.55f : 1f);
         holder.check.setContentDescription(inflater.getContext().getString(
                 app.automaticallyAllowed ? R.string.auto_allowed_app : R.string.allow_wake_app, app.label));
@@ -124,6 +133,7 @@ public class AppListAdapter extends BaseAdapter {
             }
         });
         convertView.setOnClickListener(v -> {
+            if (!changesEnabled) return;
             if (app.automaticallyAllowed) {
                 android.widget.Toast.makeText(inflater.getContext(), R.string.auto_fcm_managed,
                         android.widget.Toast.LENGTH_SHORT).show();
@@ -173,5 +183,6 @@ public class AppListAdapter extends BaseAdapter {
         TextView pkg;
         CapsuleSwitch check;
         String boundPackage;
+        boolean automaticallyAllowed;
     }
 }

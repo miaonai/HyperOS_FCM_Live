@@ -359,6 +359,7 @@ public class ManagementUiTest {
         Method method = MainActivity.class.getDeclaredMethod(name);
         method.setAccessible(true);
         method.invoke(activity);
+        if (name.equals("readPolicy")) awaitWrites();
     }
 
     private void awaitWrites() throws Exception {
@@ -411,6 +412,41 @@ public class ManagementUiTest {
         assertEquals("com.example.notes", adapter.getItem(0).packageName);
     }
 
+    @Test public void recreatedActivityReadsAfterAnOlderPendingSave() throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        SharedPreferences savedPrefs = prefs;
+        SharedPreferences blocked = mock(SharedPreferences.class);
+        SharedPreferences.Editor editor = mock(SharedPreferences.Editor.class, RETURNS_SELF);
+        when(blocked.edit()).thenReturn(editor);
+        when(editor.commit()).thenAnswer(invocation -> {
+            started.countDown();
+            assertTrue(release.await(5, TimeUnit.SECONDS));
+            return savedPrefs.edit().putStringSet(Prefs.KEY_ALLOWLIST, Set.of("com.example.notes")).commit();
+        });
+        when(((XposedService) field("xposedService").get(activity))
+                .getRemotePreferences(Prefs.GROUP_CONFIG)).thenReturn(blocked);
+        AppListAdapter adapter = (AppListAdapter) field("adapter").get(activity);
+        try {
+            adapter.getView(2, null, activity.findViewById(R.id.app_list))
+                    .findViewById(R.id.app_check).performClick();
+            assertTrue(started.await(2, TimeUnit.SECONDS));
+            controller.pause().stop().destroy();
+            controller = Robolectric.buildActivity(MainActivity.class).create().start().resume().visible();
+            activity = controller.get();
+            XposedService service = mock(XposedService.class);
+            when(service.getRemotePreferences(Prefs.GROUP_CONFIG)).thenReturn(savedPrefs);
+            field("xposedService").set(activity, service);
+            Method read = MainActivity.class.getDeclaredMethod("readPolicy");
+            read.setAccessible(true);
+            read.invoke(activity);
+            assertFalse(field("policyReady").getBoolean(activity));
+        } finally { release.countDown(); }
+        awaitWrites();
+        assertEquals(Set.of("com.example.notes"), field("allowlist").get(activity));
+        assertTrue(field("policyReady").getBoolean(activity));
+    }
+
     @Test public void menuUsesOneAnimationAndDoesNotScrollItsAnchor() {
         int before = activity.findViewById(R.id.header).getTop();
         activity.findViewById(R.id.more).performClick();
@@ -445,6 +481,39 @@ public class ManagementUiTest {
         assertTrue(dialog.isShowing());
         settleMotion();
         assertFalse(dialog.isShowing());
+    }
+
+    @Test public void scrolledMessageDoesNotBlockDraggingTheSheetTitle() throws Exception {
+        invoke("showAbout");
+        AlertDialog dialog = ShadowAlertDialog.getLatestAlertDialog();
+        View panel = dialog.getWindow().getDecorView();
+        panel.measure(View.MeasureSpec.makeMeasureSpec(388, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(220, View.MeasureSpec.EXACTLY));
+        panel.layout(0, 0, 388, 220);
+        panel.getViewTreeObserver().dispatchOnPreDraw();
+        settleMotion();
+        android.widget.ScrollView scroll = findScroll(panel);
+        assertNotNull(scroll);
+        scroll.scrollTo(0, 200);
+        assertTrue(scroll.canScrollVertically(-1));
+        long now = android.os.SystemClock.uptimeMillis();
+        dispatchDrag(dialog, now, now, android.view.MotionEvent.ACTION_DOWN, 20);
+        dispatchDrag(dialog, now, now + 40, android.view.MotionEvent.ACTION_MOVE, 140);
+        assertTrue("Title drag should move the sheet even when its message is scrolled", panel.getTranslationY() > 0);
+        dispatchDrag(dialog, now, now + 80, android.view.MotionEvent.ACTION_UP, 140);
+        settleMotion();
+        assertFalse(dialog.isShowing());
+    }
+
+    private android.widget.ScrollView findScroll(View view) {
+        if (view instanceof android.widget.ScrollView scroll) return scroll;
+        if (view instanceof android.view.ViewGroup group) {
+            for (int i = 0; i < group.getChildCount(); i++) {
+                android.widget.ScrollView scroll = findScroll(group.getChildAt(i));
+                if (scroll != null) return scroll;
+            }
+        }
+        return null;
     }
 
     private void dispatchDrag(AlertDialog dialog, long down, long time, int action, float y) {
