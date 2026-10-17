@@ -314,8 +314,9 @@ public class ManagementUiTest {
         assertTrue("New Notes must draw before existing Mail", notesDraw < mailDraw);
     }
 
-    @Test public void managementListHasNoScrollbar() {
+    @Test public void managementListHasNoScrollbarButKeepsEdgeFeedbackForShortLists() {
         assertFalse(activity.findViewById(R.id.app_list).isVerticalScrollBarEnabled());
+        assertEquals(View.OVER_SCROLL_ALWAYS, activity.findViewById(R.id.app_list).getOverScrollMode());
     }
 
     @Test @GraphicsMode(GraphicsMode.Mode.NATIVE)

@@ -26,13 +26,23 @@ public final class FrostedLayout extends FrameLayout {
         boolean hardwareBlur = Build.VERSION.SDK_INT >= 31 && canvas.isHardwareAccelerated();
         if (child.getId() == R.id.app_list && hardwareBlur && child.getWidth() > 0 && header != null) {
             if (blur == null) blur = new HeaderBlur(25 * getResources().getDisplayMetrics().density);
-            blur.record(child, header.getBottom(), getContext().getColor(R.color.background));
+            Canvas recording = blur.begin(child, getContext().getColor(R.color.background));
+            boolean more;
+            try {
+                // EdgeEffect stretches the RecordingCanvas's owner node. Going through the
+                // framework keeps it on the ListView's node, where updateDisplayListIfDirty()
+                // clears it before each recording. child.draw(recording) bypasses that reset
+                // and can leave our shared backdrop permanently stretched after a fast fling.
+                more = super.drawChild(recording, child, drawingTime);
+            } finally {
+                blur.end(child, header.getBottom());
+            }
             int save = canvas.save();
             // The header receives only the blurred image, never sharp content underneath it.
             canvas.clipRect(child.getLeft(), header.getBottom(), child.getRight(), child.getBottom());
             blur.drawSharp(canvas);
             canvas.restoreToCount(save);
-            return true;
+            return more;
         }
         if (child.getId() == R.id.header) {
             int save = canvas.save();
@@ -67,13 +77,19 @@ public final class FrostedLayout extends FrameLayout {
             backdrop.setRenderEffect(RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP));
         }
 
-        void record(View source, int headerBottom, int background) {
+        Canvas begin(View source, int background) {
             // Use the real viewport dimensions. Drawing a scrollable View into a shorter canvas
             // can change its clipping/culling relative to the visible list during placement.
             content.setPosition(source.getLeft(), source.getTop(), source.getRight(), source.getBottom());
             Canvas recording = content.beginRecording(source.getWidth(), source.getHeight());
             recording.drawColor(background);
-            source.draw(recording);
+            // drawChild applies the View's position, scrolling and render-node transforms.
+            // This recording is positioned at the View's origin, so undo only that origin.
+            recording.translate(-source.getLeft(), -source.getTop());
+            return recording;
+        }
+
+        void end(View source, int headerBottom) {
             content.endRecording();
             // Limit the blur pass to the header plus its kernel margin, while sharing the full
             // viewport recording. No second View draw and no full-screen offscreen blur texture.
