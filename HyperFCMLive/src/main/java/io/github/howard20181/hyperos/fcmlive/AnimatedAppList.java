@@ -58,7 +58,9 @@ public final class AnimatedAppList extends ListView {
         int top = getChildCount() == 0 ? getPaddingTop() : getChildAt(0).getTop();
         stopItemAnimations();
         change.run();
-        if (previous.isEmpty()) return;
+        // In touch mode ListView may read the selected row's ID while syncing a data change.
+        // An empty result has no valid anchor, so leave its layout to the data-set notification.
+        if (getCount() == 0 || previous.isEmpty()) return;
         if (getAdapter() instanceof AppListAdapter adapter) {
             for (int i = 0; i < adapter.getCount(); i++) {
                 String key = adapter.getItem(i).packageName;
@@ -67,7 +69,7 @@ public final class AnimatedAppList extends ListView {
         }
         if (!revealed.isEmpty()) revealed.addAll(stillRevealing);
         // Keep the viewport fixed, rather than letting ListView follow the old first item's ID.
-        setSelectionFromTop(Math.min(first, Math.max(0, getCount() - 1)), top - getPaddingTop());
+        setSelectionFromTop(Math.min(first, getCount() - 1), top - getPaddingTop());
         pending = () -> {
             getViewTreeObserver().removeOnPreDrawListener(pending);
             pending = null;
