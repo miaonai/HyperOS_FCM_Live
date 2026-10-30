@@ -177,6 +177,72 @@ public class ManagementUiTest {
         assertEquals(1, ((AppListAdapter) field("adapter").get(activity)).getCount());
     }
 
+    @Test @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    public void unmatchedSearchShowsEmptyStateAndClearingRestoresApps() {
+        View root = activity.findViewById(R.id.root);
+        layoutForMotion(root);
+        SearchControl search = activity.findViewById(R.id.search_view);
+        search.setIconified(false);
+        settleMotion();
+        AnimatedAppList list = activity.findViewById(R.id.app_list);
+        assertTrue("Exercise the phone's touch-mode selection path", list.isInTouchMode());
+        int originalCount = list.getCount();
+        assertTrue(list.getChildCount() > 0);
+
+        for (String query : new String[]{"不", "不存在", "不存在的应用"}) {
+            search.setQuery(query, false);
+            layoutForMotion(root);
+            settleMotion();
+            assertEquals(0, list.getCount());
+            assertEquals(0, list.getChildCount());
+            assertEquals(View.VISIBLE, activity.findViewById(R.id.empty_state).getVisibility());
+            assertEquals(activity.getString(R.string.no_apps),
+                    ((android.widget.TextView) activity.findViewById(R.id.empty)).getText().toString());
+        }
+
+        search.setQuery("Telegram", false);
+        layoutForMotion(root);
+        settleMotion();
+        assertEquals(1, list.getCount());
+        assertEquals("org.telegram.messenger", AppListAdapter.boundPackage(list.getChildAt(0)));
+        assertEquals(View.GONE, activity.findViewById(R.id.empty_state).getVisibility());
+
+        search.setQuery("不存在", false);
+        layoutForMotion(root);
+        search.setQuery("", false);
+        layoutForMotion(root);
+        settleMotion();
+        assertEquals(originalCount, list.getCount());
+        assertEquals(View.GONE, activity.findViewById(R.id.empty_state).getVisibility());
+    }
+
+    @Test @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    public void unmatchedSearchDuringPlacementCanRecoverBeforeNextLayout() throws Exception {
+        View root = activity.findViewById(R.id.root);
+        layoutForMotion(root);
+        AnimatedAppList list = activity.findViewById(R.id.app_list);
+        assertTrue(list.isInTouchMode());
+        list.getChildAt(2).findViewById(R.id.app_check).performClick();
+        layoutForMotion(root);
+        assertTrue(list.getChildAt(0).getTranslationY() > 0);
+
+        SearchControl search = activity.findViewById(R.id.search_view);
+        search.setQuery("不存在", false);
+        assertEquals(0, list.getCount());
+        assertEquals(View.VISIBLE, activity.findViewById(R.id.empty_state).getVisibility());
+        // A second keystroke can arrive while the old row views are still attached.
+        search.setQuery("不存在的应用", false);
+        search.setQuery("", false);
+        layoutForMotion(root);
+        settleMotion();
+        assertEquals(3, list.getCount());
+        assertEquals("com.example.notes", AppListAdapter.boundPackage(list.getChildAt(0)));
+        for (int i = 0; i < list.getChildCount(); i++) {
+            assertEquals(0f, list.getChildAt(i).getTranslationY(), 0.01f);
+        }
+        awaitWrites();
+    }
+
     @Test public void confirmationActionsAreEqualWidthAndTitleCentered() throws Exception {
         invoke("confirmClearAll");
         AlertDialog dialog = ShadowAlertDialog.getLatestAlertDialog();
