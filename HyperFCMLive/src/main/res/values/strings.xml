@@ -13,6 +13,8 @@
     <string name="auto_allowed_app">%1$s, automatically allowed. Turn off automatic FCM allowance in More options to change this.</string>
     <string name="auto_fcm_managed">Turn off automatic FCM allowance in More options to change this switch.</string>
     <string name="loading_apps">Checking installed apps…</string>
+    <string name="loading_policy">Reading selected apps…</string>
+    <string name="policy_read_failed">Could not read selected apps. Reopen to retry.</string>
     <string name="no_apps">No matching apps. Try another search or change the filters.</string>
     <string name="load_failed">Could not read apps. Check app list permission and reopen.</string>
     <string name="service_unavailable">LSPosed not connected. Enable the module and reopen to save selections.</string>

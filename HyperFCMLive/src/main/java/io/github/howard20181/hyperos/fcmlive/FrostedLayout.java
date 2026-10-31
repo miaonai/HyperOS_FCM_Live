@@ -47,7 +47,7 @@ public final class FrostedLayout extends FrameLayout {
         if (child.getId() == R.id.header) {
             int save = canvas.save();
             canvas.clipRect(child.getLeft(), child.getTop(), child.getRight(), child.getBottom());
-            if (hardwareBlur && blur != null) {
+            if (hardwareBlur && blur != null && findViewById(R.id.app_list).getVisibility() == VISIBLE) {
                 blur.drawBlurred(canvas);
                 tint.setColor(getContext().getColor(R.color.header_tint));
             } else {

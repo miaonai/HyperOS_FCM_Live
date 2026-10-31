@@ -59,6 +59,8 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     private long policyRevision;
     private int pendingWrites;
     private boolean policyReady;
+    private boolean policyLoading;
+    private boolean policyReadFailed;
     private long policyReadRevision;
     private AppListAdapter adapter;
     private SearchControl searchView;
@@ -217,12 +219,14 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     @Override
     protected void onRestart() {
         super.onRestart();
-        readPolicy();
-        if (!loading) {
+        boolean reloadApps = !loading;
+        if (reloadApps) {
             loading = true;
             loadFailed = false;
-            loadApps();
         }
+        filterApps(false);
+        readPolicy();
+        if (reloadApps) loadApps();
     }
 
     @Override
@@ -326,25 +330,37 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     }
 
     private void filterApps(boolean animate) {
-        String query = searchView.getQuery().toString().trim().toLowerCase(Locale.ROOT);
-        List<AppListAdapter.AppEntry> next = new ArrayList<>();
-        for (AppListAdapter.AppEntry app : allApps) {
-            if (!showSystemApps && app.systemApp) continue;
-            if (onlyFcm && !app.containsFcm) continue;
-            if (app.label.toLowerCase(Locale.ROOT).contains(query)
-                    || app.packageName.toLowerCase(Locale.ROOT).contains(query)) next.add(app);
+        AnimatedAppList list = findViewById(R.id.app_list);
+        boolean ready = !loading && !loadFailed && policyReady;
+        if (ready) {
+            String query = searchView.getQuery().toString().trim().toLowerCase(Locale.ROOT);
+            List<AppListAdapter.AppEntry> next = new ArrayList<>();
+            for (AppListAdapter.AppEntry app : allApps) {
+                if (!showSystemApps && app.systemApp) continue;
+                if (onlyFcm && !app.containsFcm) continue;
+                if (app.label.toLowerCase(Locale.ROOT).contains(query)
+                        || app.packageName.toLowerCase(Locale.ROOT).contains(query)) next.add(app);
+            }
+            // Stable sort preserves FCM/name order within each enabled/disabled group.
+            next.sort((a, b) -> Boolean.compare(b.checked, a.checked));
+            list.changeItems(animate && list.getVisibility() == View.VISIBLE, () -> {
+                filteredApps.clear();
+                filteredApps.addAll(next);
+                adapter.notifyDataSetChanged();
+            });
+        } else {
+            // Keep the last verified rows only as a hidden viewport anchor. Never publish a
+            // package snapshot until its checked states are known, regardless of completion order.
+            list.stopItemAnimations();
         }
-        // Stable sort preserves FCM/name order within each enabled/disabled group.
-        next.sort((a, b) -> Boolean.compare(b.checked, a.checked));
-        ((AnimatedAppList) findViewById(R.id.app_list)).changeItems(animate, () -> {
-            filteredApps.clear();
-            filteredApps.addAll(next);
-            adapter.notifyDataSetChanged();
-        });
+        list.setVisibility(ready ? View.VISIBLE : View.INVISIBLE);
         TextView empty = findViewById(R.id.empty);
-        empty.setText(loadFailed ? R.string.load_failed : loading ? R.string.loading_apps : R.string.no_apps);
-        findViewById(R.id.empty_state).setVisibility(filteredApps.isEmpty() ? View.VISIBLE : View.GONE);
-        findViewById(R.id.loading).setVisibility(loading ? View.VISIBLE : View.GONE);
+        empty.setText(loadFailed ? R.string.load_failed : loading ? R.string.loading_apps
+                : policyReadFailed ? R.string.policy_read_failed
+                : !policyReady ? (policyLoading ? R.string.loading_policy : R.string.service_unavailable)
+                : R.string.no_apps);
+        findViewById(R.id.empty_state).setVisibility(!ready || filteredApps.isEmpty() ? View.VISIBLE : View.GONE);
+        findViewById(R.id.loading).setVisibility(!loadFailed && (loading || policyLoading) ? View.VISIBLE : View.GONE);
         findViewById(R.id.root).invalidate();
     }
 
@@ -370,6 +386,9 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         policyReady = false;
         adapter.setChangesEnabled(false);
         XposedService service = xposedService;
+        policyLoading = service != null;
+        policyReadFailed = false;
+        filterApps(false);
         if (service == null) return;
         long revision = ++policyReadRevision;
         policyWriter.execute(() -> {
@@ -383,13 +402,19 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                     autoFcm = automatic;
                     confirmedAllowlist = new HashSet<>(selected);
                     confirmedAutoFcm = automatic;
+                    policyLoading = false;
                     policyReady = true;
                     adapter.setChangesEnabled(true);
                     // Reading saved policy is initialization, not a user toggling a switch.
                     refreshSelection(false);
                 });
             } catch (RuntimeException ignored) {
-                // Keep the last known state; edits stay disabled until a successful reload.
+                runOnUiThread(() -> {
+                    if (isDestroyed() || service != xposedService || revision != policyReadRevision) return;
+                    policyLoading = false;
+                    policyReadFailed = true;
+                    filterApps(false);
+                });
             }
         });
     }
@@ -409,7 +434,10 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                         if (!isDestroyed() && xposedService == service) {
                             xposedService = null;
                             policyReady = false;
+                            policyLoading = false;
+                            policyReadFailed = false;
                             adapter.setChangesEnabled(false);
+                            filterApps(false);
                         }
                     });
                 }

@@ -157,6 +157,15 @@ public final class SearchControl extends FrameLayout {
     }
 
     private void applyProgress() {
+        // Once the icon joins the input, the capsule owns its background. A focused or
+        // still-pressed button ripple would otherwise add a grey circle during expansion.
+        boolean compact = iconified && progress == 0;
+        if (compact && magnifier.getBackground() == null) {
+            magnifier.setBackgroundResource(R.drawable.bg_icon_button);
+        } else if (!compact && magnifier.getBackground() != null) {
+            magnifier.setBackground(null);
+        }
+        magnifier.setDefaultFocusHighlightEnabled(compact);
         float offset = Math.max(0, getWidth() - dp(48)) * (1 - progress);
         boolean rtl = getLayoutDirection() == LAYOUT_DIRECTION_RTL;
         magnifier.setTranslationX(rtl ? -offset : offset);

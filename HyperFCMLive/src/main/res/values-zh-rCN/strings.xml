@@ -14,6 +14,8 @@
     <string name="auto_allowed_app">%1$s，已自动放行。如需修改，请在更多选项中关闭自动放行。</string>
     <string name="auto_fcm_managed">如需修改此开关，请在右上角菜单中关闭自动放行。</string>
     <string name="loading_apps">正在检测已安装应用…</string>
+    <string name="loading_policy">正在读取已开启的应用…</string>
+    <string name="policy_read_failed">无法读取已开启的应用，请重新打开重试。</string>
     <string name="no_apps">没有匹配的应用，请调整搜索或筛选条件。</string>
     <string name="load_failed">无法读取应用，请检查应用列表权限后重新打开。</string>
     <string name="service_unavailable">未连接 LSPosed，请启用模块后重新打开以保存选择。</string>

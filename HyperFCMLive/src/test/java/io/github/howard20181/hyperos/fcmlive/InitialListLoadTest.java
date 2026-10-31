@@ -132,8 +132,9 @@ public class InitialListLoadTest {
         try {
             assertTrue(entered.await(5, TimeUnit.SECONDS));
             drain("appLoader");
-            assertEquals("A new package scan must not publish the previous policy during restart",
-                    0, list().getCount());
+            assertEquals("The previous verified list must stay hidden until both refreshed inputs arrive",
+                    View.INVISIBLE, list().getVisibility());
+            assertTrue("Do not publish a new order using the previous policy", publishedFirstPackages.isEmpty());
         } finally { release.countDown(); }
         drain("policyWriter");
         assertOnlyPublished(FIRST_BY_NAME);
