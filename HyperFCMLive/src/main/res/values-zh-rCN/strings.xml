@@ -28,6 +28,6 @@
     <string name="open_diagnostics">打开 FCM Diagnostics</string>
     <string name="diagnostics_unavailable">无法打开 FCM Diagnostics，请检查 Google Play 服务是否已安装并启用。</string>
     <string name="about">关于</string>
-    <string name="about_message">v%1$s\n\n本项目遵循 GPLv3，在 GitHub 开源。\nCopyright © 2026 Hyper FCM Live Contributors\n\n贡献者：\nHoward20181、billtv、zuohl、miaonai</string>
+    <string name="about_message">v%1$s\n\n本项目遵循 GPLv3，在 GitHub 开源。\nCopyright © 2026 Hyper FCM Live Contributors\n\n贡献者：\nHoward20181、zuohl、miaonai\n793354162、E3N-glotm</string>
     <string name="version_unknown">未知</string>
 </resources>

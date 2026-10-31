@@ -33,7 +33,7 @@
 
 ## 贡献者与致谢
 
-贡献者：Howard20181、billtv、zuohl、miaonai。感谢 [billtv](https://github.com/billtv) 提供 HyperOS 4（Android 17）支持。
+贡献者：Howard20181、zuohl、miaonai、793354162、E3N-glotm。HyperOS 4 的原始适配来自 Howard20181，PowerKeeper 与 Greeze 的后续兼容修复来自 793354162 和 E3N-glotm。
 
 FCM 相关实现参考 [kooritea/fcmfix](https://github.com/kooritea/fcmfix)；界面参考 Sui、Miuix 和 InstallerX-Revived，详见[第三方说明](THIRD_PARTY_NOTICES.md)。
 

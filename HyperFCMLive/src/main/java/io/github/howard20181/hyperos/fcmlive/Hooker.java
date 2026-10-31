@@ -20,6 +20,7 @@ import androidx.annotation.RequiresApi;
 import java.lang.reflect.Executable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
@@ -278,151 +279,145 @@ public class Hooker extends XposedModule {
         }
     }
 
-    private void hookGreezeManagerService(ClassLoader classLoader)
-            throws ClassNotFoundException, NoSuchMethodException {
-        var GreezeManagerServiceClass = classLoader.loadClass("com.miui.server.greeze.GreezeManagerService");
+    private Method optionalMethod(Class<?> owner, String name, Class<?>... parameters) {
         try {
-            // am.ProcessRecord app = BroadcastProcessQueue.app, app nullable
-            // but when app is null, this method will not call
-            // calleePkgName = (app.info == null || app.info.packageName == null) ? app.processName : app.info.packageName
-            // It could be the process name.
-            // boolean isAllowBroadcast(int callerUid, String callerPkgName, int calleeUid, String calleePkgName, String action)
-            var isAllowBroadcastMethod = GreezeManagerServiceClass.getDeclaredMethod("isAllowBroadcast", int.class, String.class, int.class, String.class, String.class);
-            var getPackageNameFromUidMethod = GreezeManagerServiceClass.getDeclaredMethod("getPackageNameFromUid", int.class);
-            getPackageNameFromUidMethod.setAccessible(true);
-            hookE(isAllowBroadcastMethod).intercept(chain -> {
-                String calleePkgName = chain.getArg(3) instanceof String calleeProcessName ? calleeProcessName : null;
-                try {
-                    if (chain.getArg(2) instanceof Integer calleeUid
-                            && getInvoker(getPackageNameFromUidMethod).invoke(chain.getThisObject(), calleeUid) instanceof String calleePackageName) {
-                        calleePkgName = calleePackageName;
+            return owner.getDeclaredMethod(name, parameters);
+        } catch (NoSuchMethodException ignored) {
+            log(Log.INFO, TAG, "Optional ROM method unavailable: " + owner.getName() + "." + name);
+            return null;
+        }
+    }
+
+    private Field optionalField(Class<?> owner, String... names) {
+        for (String name : names) {
+            try {
+                Field field = owner.getDeclaredField(name);
+                field.setAccessible(true);
+                return field;
+            } catch (NoSuchFieldException ignored) {
+                // Try the next name used by another ROM version.
+            }
+        }
+        log(Log.INFO, TAG, "Optional ROM field unavailable: " + owner.getName() + "." + String.join("/", names));
+        return null;
+    }
+
+    private Class<?> optionalClass(ClassLoader loader, String name) {
+        try {
+            return loader.loadClass(name);
+        } catch (ClassNotFoundException ignored) {
+            log(Log.INFO, TAG, "Optional ROM class unavailable: " + name);
+            return null;
+        }
+    }
+
+    // Adapted from upstream PR #31 (E3N-glotm), retaining this branch's hook identities.
+    private void hookGreezeManagerService(ClassLoader classLoader) throws ClassNotFoundException {
+        Class<?> service = classLoader.loadClass("com.miui.server.greeze.GreezeManagerService");
+        Method uidLookup = optionalMethod(service, "getPackageNameFromUid", int.class);
+        if (uidLookup != null) uidLookup.setAccessible(true);
+        Method broadcast = optionalMethod(service, "isAllowBroadcast",
+                int.class, String.class, int.class, String.class, String.class);
+        if (broadcast != null) {
+            hookE(broadcast).intercept(chain -> {
+                String callee = chain.getArg(3) instanceof String processName ? processName : null;
+                if (uidLookup != null && chain.getArg(2) instanceof Integer uid) {
+                    try {
+                        Object packageName = getInvoker(uidLookup).invoke(chain.getThisObject(), uid);
+                        if (packageName instanceof String name) callee = name;
+                    } catch (Exception exception) {
+                        log(Log.WARN, TAG, "Greeze UID lookup failed; retaining callee process name", exception);
                     }
-                } catch (Exception e) {
-                    log(Log.ERROR, TAG, "Failed to get callee package name", e);
                 }
                 if (chain.getArg(4) instanceof String action
-                        && ((chain.getArg(1) instanceof String callerPkgName
-                        // callerPkgName get from intent or BroadcastRecord.callerPackage,
-                        // both are nullable, but they won't become null in FCM broadcasts.
-                        && GMS_PACKAGE_NAME.equals(callerPkgName)
+                        && ((chain.getArg(1) instanceof String caller && GMS_PACKAGE_NAME.equals(caller)
                         && ACTION_REMOTE_INTENT.equals(action))
-                        || ((GMS_PACKAGE_NAME.equals(calleePkgName)
-                        || GMS_PERSISTENT_PROCESS_NAME.equals(calleePkgName))
+                        || ((GMS_PACKAGE_NAME.equals(callee) || GMS_PERSISTENT_PROCESS_NAME.equals(callee))
                         && CN_DEFER_BROADCAST.contains(action)))) {
                     return true;
                 }
                 return chain.proceed();
             });
-            deoptimize(isAllowBroadcastMethod);
-        } catch (Exception e) {
-            log(Log.ERROR, TAG, "Failed to hook GreezeManagerService#isAllowBroadcast", e);
+            deoptimize(broadcast);
         }
-        try {
-            // boolean deferBroadcastForMiui(String action)
-            var deferBroadcastForMiuiMethod = GreezeManagerServiceClass.getDeclaredMethod("deferBroadcastForMiui", String.class);
-            hookE(deferBroadcastForMiuiMethod).intercept(chain -> {
-                if (chain.getArg(0) instanceof String action
-                        && CN_DEFER_BROADCAST.contains(action)) {
-                    return false;
-                }
+
+        Method defer = optionalMethod(service, "deferBroadcastForMiui", String.class);
+        if (defer != null) {
+            hookE(defer).intercept(chain -> {
+                if (chain.getArg(0) instanceof String action && CN_DEFER_BROADCAST.contains(action)) return false;
                 return chain.proceed();
             });
-            deoptimize(deferBroadcastForMiuiMethod);
-        } catch (Exception e) {
-            log(Log.ERROR, TAG, "Failed to hook GreezeManagerService#deferBroadcastForMiui", e);
+            deoptimize(defer);
         }
-        Method triggerGMSLimitActionMethod;
-        try {
-            triggerGMSLimitActionMethod = GreezeManagerServiceClass.getDeclaredMethod("triggerGMSLimitAction", boolean.class);
-        } catch (NoSuchMethodException ignored) {
-            triggerGMSLimitActionMethod = GreezeManagerServiceClass.getDeclaredMethod("triggerGMSLimitAction");
-        }
-        hookE(triggerGMSLimitActionMethod).intercept(chain -> {
-            if (!chain.getArgs().isEmpty()) {
-                var args = chain.getArgs().toArray();
-                args[0] = false;
-                return chain.proceed(args);
-            } else {
-                var mGmsLimitEnabled = GreezeManagerServiceClass.getDeclaredField("mGmsLimitEnabled");
-                UnsafeUtils.INSTANCE.setBooleanField(mGmsLimitEnabled, chain.getThisObject(), false);
+
+        Method trigger = optionalMethod(service, "triggerGMSLimitAction", boolean.class);
+        if (trigger == null) trigger = optionalMethod(service, "triggerGMSLimitAction");
+        if (trigger != null) {
+            Method selected = trigger;
+            Field limit = selected.getParameterCount() == 0 ? optionalField(service, "mGmsLimitEnabled") : null;
+            hookE(selected).intercept(chain -> {
+                if (!chain.getArgs().isEmpty()) {
+                    Object[] args = chain.getArgs().toArray();
+                    args[0] = false;
+                    return chain.proceed(args);
+                }
+                if (limit != null) UnsafeUtils.INSTANCE.setBooleanField(limit, chain.getThisObject(), false);
                 return chain.proceed();
-            }
-        });
-        deoptimize(triggerGMSLimitActionMethod);
+            });
+            deoptimize(selected);
+        }
     }
 
     private void hookDomesticPolicyManager(ClassLoader classLoader) throws ClassNotFoundException,
             NoSuchMethodException {
-        var DomesticPolicyManagerClass = classLoader.loadClass("com.miui.server.greeze.DomesticPolicyManager");
-        // boolean deferBroadcast(String action)
-        var deferBroadcastMethod = DomesticPolicyManagerClass.getDeclaredMethod("deferBroadcast", String.class);
-        hookE(deferBroadcastMethod).intercept(chain -> false);
-        deoptimize(deferBroadcastMethod);
+        Class<?> policy = classLoader.loadClass("com.miui.server.greeze.DomesticPolicyManager");
+        Method defer = policy.getDeclaredMethod("deferBroadcast", String.class);
+        hookE(defer).intercept(chain -> {
+            if (chain.getArg(0) instanceof String action
+                    && (ACTION_REMOTE_INTENT.equals(action) || CN_DEFER_BROADCAST.contains(action))) return false;
+            return chain.proceed();
+        });
+        deoptimize(defer);
     }
 
     private void hookListAppsManager(ClassLoader classLoader) throws ClassNotFoundException {
-        var ListAppsManagerClass = classLoader.loadClass("com.miui.server.greeze.power.ListAppsManager");
-        Field mSystemBlackListField = null;
-        try {
-            mSystemBlackListField = ListAppsManagerClass.getDeclaredField("mSystemBlackList");
-        } catch (NoSuchFieldException e) {
-            try {
-                mSystemBlackListField = ListAppsManagerClass.getDeclaredField("SYSTEM_BLACK_LIST");
-            } catch (NoSuchFieldException ex) {
-                log(Log.ERROR, TAG, "Failed to find ListAppsManager.mSystemBlackList or ListAppsManager.SYSTEM_BLACK_LIST", e);
-            }
-        }
-        if (mSystemBlackListField != null) {
-            mSystemBlackListField.setAccessible(true);
-            var PowerStrategyModeConstructors = ListAppsManagerClass.getDeclaredConstructors();
-            for (var constructor : PowerStrategyModeConstructors) {
-                Field finalMSystemBlackListField = mSystemBlackListField;
+        Class<?> lists = classLoader.loadClass("com.miui.server.greeze.power.ListAppsManager");
+        Field blacklist = optionalField(lists, "mSystemBlackList", "SYSTEM_BLACK_LIST");
+        if (blacklist != null) {
+            for (var constructor : lists.getDeclaredConstructors()) {
                 hookE(constructor).intercept(chain -> {
                     try {
                         return chain.proceed();
                     } finally {
                         try {
-                            var mSystemBlackList = (List<String>) finalMSystemBlackListField.get(chain.getThisObject());
-                            if (mSystemBlackList != null) {
-                                mSystemBlackList.remove(GMS_PACKAGE_NAME);
+                            if (blacklist.get(chain.getThisObject()) instanceof List<?> packages) {
+                                packages.remove(GMS_PACKAGE_NAME);
                             }
-                        } catch (Exception e) {
-                            log(Log.ERROR, TAG, "Failed to modify system blacklist", e);
+                        } catch (Exception exception) {
+                            log(Log.WARN, TAG, "Failed to update ListAppsManager blacklist", exception);
                         }
                     }
                 });
                 deoptimize(constructor);
             }
         }
-        try {
-            var isInWhiteListMethod = ListAppsManagerClass.getDeclaredMethod("isInWhiteList", String.class);
-            Field mUseDataWhiteListField = null;
-            try {
-                mUseDataWhiteListField = ListAppsManagerClass.getDeclaredField("mUseDataWhiteList");
-            } catch (NoSuchFieldException e) {
+
+        Method isInWhiteList = optionalMethod(lists, "isInWhiteList", String.class);
+        Field whitelist = optionalField(lists, "mUseDataWhiteList", "USE_DATA_WHITE_LIST");
+        if (isInWhiteList != null && whitelist != null) {
+            hookE(isInWhiteList).intercept(chain -> {
                 try {
-                    mUseDataWhiteListField = ListAppsManagerClass.getDeclaredField("USE_DATA_WHITE_LIST");
-                } catch (NoSuchFieldException ex) {
-                    log(Log.ERROR, TAG, "Failed to find ListAppsManager.mUseDataWhiteList or ListAppsManager.USE_DATA_WHITE_LIST", e);
-                }
-            }
-            if (mUseDataWhiteListField != null) {
-                mUseDataWhiteListField.setAccessible(true);
-                Field finalMUseDataWhiteListField = mUseDataWhiteListField;
-                hookE(isInWhiteListMethod).intercept(chain -> {
-                    try {
-                        var mUseDataWhiteList = (Set<String>) finalMUseDataWhiteListField.get(chain.getThisObject());
-                        if (mUseDataWhiteList != null) {
-                            mUseDataWhiteList.add(GMS_PACKAGE_NAME);
-                        }
-                    } catch (Exception e) {
-                        log(Log.ERROR, TAG, "Failed to modify use data whitelist", e);
+                    if (whitelist.get(chain.getThisObject()) instanceof Set<?> packages) {
+                        @SuppressWarnings("unchecked")
+                        Set<String> names = (Set<String>) packages;
+                        names.add(GMS_PACKAGE_NAME);
                     }
-                    return chain.proceed();
-                });
-            }
-        } catch (NoSuchMethodException e) {
-            log(Log.ERROR, TAG, "Failed to hook ListAppsManager#isInWhiteList", e);
+                } catch (Exception exception) {
+                    log(Log.WARN, TAG, "Failed to update ListAppsManager whitelist", exception);
+                }
+                return chain.proceed();
+            });
+            deoptimize(isInWhiteList);
         }
     }
 
@@ -463,10 +458,11 @@ public class Hooker extends XposedModule {
         hookE(getWhiteListMethod).intercept(chain -> {
             var result = chain.proceed();
             if (chain.getArg(0) instanceof Integer flags && (flags & 1) != 0) {
-                if (result instanceof List<?>) {
-                    var whiteList = (List<String>) result;
-                    whiteList.add(GMS_PACKAGE_NAME);
-                    whiteList.add(GMS_PERSISTENT_PROCESS_NAME);
+                if (result instanceof List<?> original) {
+                    List<Object> whiteList = new ArrayList<>(original);
+                    if (!whiteList.contains(GMS_PACKAGE_NAME)) whiteList.add(GMS_PACKAGE_NAME);
+                    if (!whiteList.contains(GMS_PERSISTENT_PROCESS_NAME)) whiteList.add(GMS_PERSISTENT_PROCESS_NAME);
+                    return whiteList;
                 }
             }
             return result;
@@ -498,31 +494,34 @@ public class Hooker extends XposedModule {
         }
     }
 
-    private void hookGmsObserver(ClassLoader classLoader) throws ClassNotFoundException,
-            NoSuchMethodException {
-        var NetdExecutorClass = classLoader.loadClass("com.miui.powerkeeper.utils.NetdExecutor");
-        var initGmsChainMethod = NetdExecutorClass.getDeclaredMethod("initGmsChain", String.class, int.class, String.class);
-        hookE(initGmsChainMethod).intercept(chain -> {
-            var args = chain.getArgs().toArray();
-            args[2] = "ACCEPT";
-            return chain.proceed(args);
-        });
-        deoptimize(initGmsChainMethod);
-        var GmsObserverClass = classLoader.loadClass("com.miui.powerkeeper.utils.GmsObserver");
-        Hooker hooker = chain -> {
-            var args = chain.getArgs().toArray();
-            args[0] = false;
-            return chain.proceed(args);
-        };
-        var updateGmsAlarmMethod = GmsObserverClass.getDeclaredMethod("updateGmsAlarm", boolean.class);
-        hookE(updateGmsAlarmMethod).intercept(hooker);
-        deoptimize(updateGmsAlarmMethod);
-        var updateGmsNetWorkMethod = GmsObserverClass.getDeclaredMethod("updateGmsNetWork", boolean.class);
-        hookE(updateGmsNetWorkMethod).intercept(hooker);
-        deoptimize(updateGmsNetWorkMethod);
-        var updateGoogleReletivesWakelockMethod = GmsObserverClass.getDeclaredMethod("updateGoogleReletivesWakelock", boolean.class);
-        hookE(updateGoogleReletivesWakelockMethod).intercept(hooker);
-        deoptimize(updateGoogleReletivesWakelockMethod);
+    // Upstream PR #30 by 793354162, also included in PR #31 by E3N-glotm.
+    private void hookGmsObserver(ClassLoader classLoader) {
+        Class<?> netd = optionalClass(classLoader, "com.miui.powerkeeper.utils.NetdExecutor");
+        if (netd != null) {
+            Method init = optionalMethod(netd, "initGmsChain", String.class, int.class, String.class);
+            if (init != null) {
+                hookE(init).intercept(chain -> {
+                    Object[] args = chain.getArgs().toArray();
+                    args[2] = "ACCEPT";
+                    return chain.proceed(args);
+                });
+                deoptimize(init);
+            }
+        }
+
+        Class<?> observer = optionalClass(classLoader, "com.miui.powerkeeper.utils.GmsObserver");
+        if (observer == null) return;
+        for (String name : new String[]{"updateGmsAlarm", "updateGmsNetWork",
+                "updateGoogleReletivesWakelock", "updateFrameworkGmsNetStatus"}) {
+            Method method = optionalMethod(observer, name, boolean.class);
+            if (method == null) continue;
+            hookE(method).intercept(chain -> {
+                Object[] args = chain.getArgs().toArray();
+                args[0] = false;
+                return chain.proceed(args);
+            });
+            deoptimize(method);
+        }
     }
 
     private void hookGlobalFeatureConfigureHelper(ClassLoader classLoader)
