@@ -178,7 +178,7 @@ public class ManagementUiTest {
     }
 
     @Test @GraphicsMode(GraphicsMode.Mode.NATIVE)
-    public void expandedSearchHasNoCircularHighlightBehindTheMagnifier() {
+    public void expandedSearchHasNoCircularHighlightBehindTheMagnifier() throws Exception {
         View root = activity.findViewById(R.id.root);
         layoutForMotion(root);
         SearchControl search = activity.findViewById(R.id.search_view);
@@ -193,6 +193,10 @@ public class ManagementUiTest {
             Bitmap bitmap = Bitmap.createBitmap(search.getWidth(), search.getHeight(), Bitmap.Config.ARGB_8888);
             try {
                 search.draw(new Canvas(bitmap));
+                // Patterned ripples start their focus animation lazily on the first draw.
+                Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(120));
+                search.draw(new Canvas(bitmap));
+                saveRender(search, search.getWidth(), search.getHeight(), "management-search-focused.png");
                 assertEquals("The expanded capsule must have one uniform surface, including behind a focused/pressed icon",
                         activity.getColor(R.color.search_surface), bitmap.getPixel(24, 8));
             } finally { bitmap.recycle(); }
