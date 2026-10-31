@@ -44,7 +44,7 @@
 
 妥善备份密钥库和密码。后续版本必须使用同一密钥才能覆盖安装。Release 构建缺少签名配置会失败，不会回退到调试签名。
 
-在 Actions → Android CI → Run workflow 选择要构建的分支。构建完成后下载 `hyperos-fcm-live-release` artifact，解压即可安装其中的 APK。主分支构建通过测试、Lint 和 APK 签名验证后，会自动将 `nightly` 标签推进到本次构建的提交，并上传 APK 到 Nightly 预发布；独立分支手动构建只上传 artifact。
+在 Actions → Android CI → Run workflow 选择要构建的分支。构建完成后下载 `hyperos-fcm-live-release` artifact，解压即可安装其中的 APK。主分支构建通过测试、Lint 和 APK 签名验证后，会自动将 `nightly` 标签推进到本次构建的提交，并上传 APK 到 Nightly 预发布。确认新 APK 上传完整且 SHA-256 与构建产物一致后，自动删除 Nightly 中的旧版 APK，只保留最新版；独立分支手动构建只上传 artifact。
 
 本地构建先安装 JDK 21 和对应 Android SDK，并在不入库的 `local.properties` 中配置 `sdk.dir`、`storeFile`、`storePassword`、`keyAlias`、`keyPassword`，然后运行：
 

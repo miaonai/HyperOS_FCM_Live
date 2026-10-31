@@ -168,3 +168,31 @@ jobs:
           target_commitish: ${{ github.sha }}
           files: release/*.apk
           fail_on_unmatched_files: true
+
+      - name: Remove superseded nightly APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mapfile -t current_apks < <(find release -maxdepth 1 -type f -name '*.apk' -printf '%f\n')
+          if [ "${#current_apks[@]}" -ne 1 ]; then
+            echo "Exactly one verified release APK is required before pruning Nightly." >&2
+            exit 1
+          fi
+          repository="repos/${GITHUB_REPOSITORY}"
+          release_json="$(gh api "${repository}/releases/tags/nightly")"
+          expected_digest="sha256:$(sha256sum "release/${current_apks[0]}" | cut -d ' ' -f 1)"
+          printf '%s' "$release_json" | jq -e --arg name "${current_apks[0]}" --arg digest "$expected_digest" \
+            'any(.assets[]; .name == $name and .state == "uploaded" and .digest == $digest)' > /dev/null
+          # A newer run may have advanced the tag after this run published its APK.
+          # Check after taking the asset snapshot so that newer uploads cannot be deleted.
+          tag_commit="$(gh api "${repository}/git/ref/tags/nightly" --jq .object.sha)"
+          if [ "$tag_commit" != "$GITHUB_SHA" ]; then
+            echo "A newer Nightly is being published; leaving cleanup to that run."
+            exit 0
+          fi
+          mapfile -t old_asset_ids < <(printf '%s' "$release_json" | jq -r --arg name "${current_apks[0]}" \
+            '.assets[] | select(.name != $name and (.name | startswith("HyperFCMLive-")) and (.name | endswith("-release.apk"))) | .id')
+          for asset_id in "${old_asset_ids[@]}"; do
+            gh api --method DELETE "${repository}/releases/assets/${asset_id}" --silent
+          done
