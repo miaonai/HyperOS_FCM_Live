@@ -1,24 +1,22 @@
 # Hyper FCM Live
 
-面向国行 HyperOS 的 LSPosed 模块，解除系统对 Google FCM 连接广播和应用唤醒的限制，让所选应用能够通过 FCM 接收后台推送。
+面向国行 HyperOS 的 LSPosed 模块，配有 MIUIX 风格的管理 App。解除系统对 Google FCM 连接广播和应用唤醒的限制，让所选应用能够通过 FCM 接收后台推送。
 
 项目源自 [Howard20181/HyperOS_FCM_Live](https://github.com/Howard20181/HyperOS_FCM_Live)，本分支基于 [billtv/HyperOS_FCM_Live](https://github.com/billtv/HyperOS_FCM_Live) 继续维护。
 
 | 项目 | 说明 |
 | --- | --- |
 | 下载 | [正式版](https://github.com/miaonai/HyperOS_FCM_Live/releases/latest) · [Nightly](https://github.com/miaonai/HyperOS_FCM_Live/releases/tag/nightly) |
-| 适用系统 | 国行 HyperOS |
-| 测试反馈 | HyperOS 4（Android 17）初步真机测试有效 |
+| 目标系统 | 国行 HyperOS 3 / 4（Android 16 / 17） |
 | 运行环境 | Root，以及支持现代 libxposed API 101 及以上的 LSPosed |
 | 作用域 | 系统框架（`system`）和电量与性能（`com.miui.powerkeeper`） |
+| 管理界面 | MIUIX 风格，支持浅色、深色主题 |
 
 ## 功能
 
 - 放行 FCM 连接相关广播，解除电量与性能对 Google Play 服务联网、闹钟和唤醒锁的限制。
 - 按应用选择允许 FCM 唤醒的对象，支持全选、清除和自动放行包含 FCM 的应用。
 - 按应用名或包名搜索，筛选 FCM 应用和系统应用，并可打开 Google Play 服务的 FCM Diagnostics 检查连接。
-
-管理界面参考 [XiaoTong6666/Sui](https://github.com/XiaoTong6666/Sui) 的 MIUIX 风格，支持浅色、深色主题。
 
 ## 安装与使用
 
@@ -33,12 +31,12 @@
 
 ## 贡献者与致谢
 
-贡献者：Howard20181、zuohl、miaonai、793354162、E3N-glotm。HyperOS 4 的原始适配来自 Howard20181，PowerKeeper 与 Greeze 的后续兼容修复来自 793354162 和 E3N-glotm。
+贡献者：Howard20181、zuohl、miaonai、793354162、E3N-glotm。
 
-FCM 相关实现参考 [kooritea/fcmfix](https://github.com/kooritea/fcmfix)；界面参考 Sui、Miuix 和 InstallerX-Revived，详见[第三方说明](THIRD_PARTY_NOTICES.md)。
+FCM 相关实现参考 [kooritea/fcmfix](https://github.com/kooritea/fcmfix)；界面参考 [Sui](https://github.com/XiaoTong6666/Sui)、Miuix 和 InstallerX-Revived，详见[第三方说明](THIRD_PARTY_NOTICES.md)。
 
 ## 开发与许可
 
-应用界面和 Hook 实现位于 `HyperFCMLive`，隐藏 API 桥接位于 `hiddenapi`。构建、测试和签名配置见[开发说明](docs/development.md)。
+应用界面和 Hook 实现位于 `HyperFCMLive`，隐藏 API 桥接位于 `hiddenapi`。构建、测试和签名配置见 [Android CI](.github/workflows/android.yml)。
 
 本项目采用 [GPLv3](LICENSE) 开源。
