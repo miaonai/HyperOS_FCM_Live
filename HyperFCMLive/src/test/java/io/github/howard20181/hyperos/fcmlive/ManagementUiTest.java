@@ -320,6 +320,60 @@ public class ManagementUiTest {
         assertTrue(adapter.hasStableIds());
     }
 
+    @Test public void restoredPolicyDoesNotAnimateEnabledAppsFromBelow() throws Exception {
+        View root = activity.findViewById(R.id.root);
+        layoutForMotion(root);
+        settleMotion();
+        prefs.edit().putStringSet(Prefs.KEY_ALLOWLIST, Set.of("com.example.mail")).commit();
+        invoke("readPolicy");
+        layoutForMotion(root);
+        AnimatedAppList list = activity.findViewById(R.id.app_list);
+        assertEquals("com.example.mail", AppListAdapter.boundPackage(list.getChildAt(0)));
+        assertEquals("Restoring saved selections must place enabled apps at the top immediately",
+                0f, list.getChildAt(0).getTranslationY(), 0.01f);
+    }
+
+    @Test public void delayedPolicyAfterChangingBothFiltersDoesNotAnimateEnabledAppsFromBelow() throws Exception {
+        View root = activity.findViewById(R.id.root);
+        layoutForMotion(root);
+        settleMotion();
+        prefs.edit().putStringSet(Prefs.KEY_ALLOWLIST,
+                Set.of("com.example.mail", "com.example.system")).commit();
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        XposedService service = mock(XposedService.class);
+        when(service.getRemotePreferences(Prefs.GROUP_CONFIG)).thenAnswer(invocation -> {
+            entered.countDown();
+            assertTrue(release.await(5, TimeUnit.SECONDS));
+            return prefs;
+        });
+        field("xposedService").set(activity, service);
+        Method read = MainActivity.class.getDeclaredMethod("readPolicy");
+        read.setAccessible(true);
+        read.invoke(activity);
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            for (boolean enabled : new boolean[]{true, false, true}) {
+                field("onlyFcm").setBoolean(activity, enabled);
+                field("showSystemApps").setBoolean(activity, enabled);
+                invoke("filterApps");
+                layoutForMotion(root);
+                settleMotion();
+            }
+        } finally {
+            release.countDown();
+        }
+        awaitWrites();
+        layoutForMotion(root);
+        AnimatedAppList list = activity.findViewById(R.id.app_list);
+        assertEquals("com.example.mail", AppListAdapter.boundPackage(list.getChildAt(0)));
+        assertEquals("com.example.system", AppListAdapter.boundPackage(list.getChildAt(1)));
+        for (int i = 0; i < list.getChildCount(); i++) {
+            assertEquals("A late policy response must not replay switch placement animations",
+                    0f, list.getChildAt(i).getTranslationY(), 0.01f);
+        }
+    }
+
     @Test public void aboutWindowHasNoDimOrBackgroundBlur() throws Exception {
         invoke("showAbout");
         AlertDialog dialog = ShadowAlertDialog.getLatestAlertDialog();
