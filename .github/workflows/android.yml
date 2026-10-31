@@ -143,6 +143,21 @@ jobs:
           name: hyperos-fcm-live-release
           path: release
 
+      - name: Sync nightly tag with the verified build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repository="repos/${GITHUB_REPOSITORY}"
+          if gh api "${repository}/git/ref/tags/nightly" --silent 2>/dev/null; then
+            # Only advance the tag, so an older run cannot replace a newer nightly.
+            gh api --method PATCH "${repository}/git/refs/tags/nightly" \
+              -f sha="${GITHUB_SHA}" -F force=false --silent
+          else
+            gh api --method POST "${repository}/git/refs" \
+              -f ref=refs/tags/nightly -f sha="${GITHUB_SHA}" --silent
+          fi
+
       - name: Publish nightly release
         uses: softprops/action-gh-release@v2
         with:
