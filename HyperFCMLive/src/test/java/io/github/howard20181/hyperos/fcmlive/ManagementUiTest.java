@@ -325,12 +325,16 @@ public class ManagementUiTest {
         layoutForMotion(root);
         settleMotion();
         prefs.edit().putStringSet(Prefs.KEY_ALLOWLIST, Set.of("com.example.mail")).commit();
-        invoke("readPolicy");
-        layoutForMotion(root);
-        AnimatedAppList list = activity.findViewById(R.id.app_list);
-        assertEquals("com.example.mail", AppListAdapter.boundPackage(list.getChildAt(0)));
-        assertEquals("Restoring saved selections must place enabled apps at the top immediately",
-                0f, list.getChildAt(0).getTranslationY(), 0.01f);
+        Method read = MainActivity.class.getDeclaredMethod("readPolicy");
+        read.setAccessible(true);
+        read.invoke(activity);
+        assertPolicyFrame(() -> {
+            layoutForMotion(root);
+            AnimatedAppList list = activity.findViewById(R.id.app_list);
+            assertEquals("com.example.mail", AppListAdapter.boundPackage(list.getChildAt(0)));
+            assertEquals("Restoring saved selections must place enabled apps at the top immediately",
+                    0f, list.getChildAt(0).getTranslationY(), 0.01f);
+        });
     }
 
     @Test public void delayedPolicyAfterChangingBothFiltersDoesNotAnimateEnabledAppsFromBelow() throws Exception {
@@ -363,15 +367,24 @@ public class ManagementUiTest {
         } finally {
             release.countDown();
         }
-        awaitWrites();
-        layoutForMotion(root);
-        AnimatedAppList list = activity.findViewById(R.id.app_list);
-        assertEquals("com.example.mail", AppListAdapter.boundPackage(list.getChildAt(0)));
-        assertEquals("com.example.system", AppListAdapter.boundPackage(list.getChildAt(1)));
-        for (int i = 0; i < list.getChildCount(); i++) {
-            assertEquals("A late policy response must not replay switch placement animations",
-                    0f, list.getChildAt(i).getTranslationY(), 0.01f);
-        }
+        assertPolicyFrame(() -> {
+            layoutForMotion(root);
+            AnimatedAppList list = activity.findViewById(R.id.app_list);
+            assertEquals("com.example.mail", AppListAdapter.boundPackage(list.getChildAt(0)));
+            assertEquals("com.example.system", AppListAdapter.boundPackage(list.getChildAt(1)));
+            for (int i = 0; i < list.getChildCount(); i++) {
+                assertEquals("A late policy response must not replay switch placement animations",
+                        0f, list.getChildAt(i).getTranslationY(), 0.01f);
+            }
+        });
+    }
+
+    private void assertPolicyFrame(Runnable assertion) throws Exception {
+        // Queue the assertion after the real policy callback, before the next animation frame.
+        // awaitWrites() drains UI work first and can hide the very first placement frame.
+        ((ExecutorService) field("policyWriter").get(activity)).submit(() -> { }).get(5, TimeUnit.SECONDS);
+        new android.os.Handler(Looper.getMainLooper()).post(assertion);
+        Shadows.shadowOf(Looper.getMainLooper()).idle();
     }
 
     @Test public void aboutWindowHasNoDimOrBackgroundBlur() throws Exception {
