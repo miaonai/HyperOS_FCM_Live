@@ -70,6 +70,9 @@ public class InitialListLoadTest {
         assertTrue("The package scan must have produced actual apps", allApps().size() >= 2);
         assertEquals("No provisional alphabetical/FCM list may reach the adapter before policy arrives",
                 0, list().getCount());
+        assertEquals(View.GONE, activity.findViewById(R.id.loading).getVisibility());
+        assertEquals(activity.getString(R.string.service_unavailable),
+                ((android.widget.TextView) activity.findViewById(R.id.empty)).getText().toString());
         bindAndRead();
         drain("policyWriter");
         assertOnlyPublished(SELECTED);
@@ -150,8 +153,10 @@ public class InitialListLoadTest {
         assertEquals(0, list().getCount());
         assertEquals("Failure must not leave an endless spinner", View.GONE,
                 activity.findViewById(R.id.loading).getVisibility());
+        assertEquals(activity.getString(R.string.policy_read_failed),
+                ((android.widget.TextView) activity.findViewById(R.id.empty)).getText().toString());
         assertTrue(publishedFirstPackages.isEmpty());
-        when(service.getRemotePreferences(Prefs.GROUP_CONFIG)).thenReturn(prefs);
+        doReturn(prefs).when(service).getRemotePreferences(Prefs.GROUP_CONFIG);
         bindAndRead();
         drain("policyWriter");
         assertOnlyPublished(SELECTED);
@@ -186,6 +191,7 @@ public class InitialListLoadTest {
     }
 
     private void assertOnlyPublished(String expected) {
+        assertEquals(View.VISIBLE, list().getVisibility());
         assertTrue("Both inputs must produce visible rows", list().getCount() >= 2);
         assertFalse("Observe at least one nonempty data-set notification", publishedFirstPackages.isEmpty());
         for (String firstPackage : publishedFirstPackages) assertEquals("Every published order must already be final",
