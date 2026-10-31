@@ -357,9 +357,10 @@ public class ManagementUiTest {
         read.invoke(activity);
         try {
             assertTrue(entered.await(5, TimeUnit.SECONDS));
-            for (boolean enabled : new boolean[]{true, false, true}) {
-                field("onlyFcm").setBoolean(activity, enabled);
-                field("showSystemApps").setBoolean(activity, enabled);
+            for (boolean[] filters : new boolean[][]{
+                    {true, false}, {false, false}, {false, true}, {false, false}, {true, true}}) {
+                field("onlyFcm").setBoolean(activity, filters[0]);
+                field("showSystemApps").setBoolean(activity, filters[1]);
                 invoke("filterApps");
                 layoutForMotion(root);
                 settleMotion();

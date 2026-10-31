@@ -11,6 +11,9 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.SpannableString;
+import android.text.Spanned;
+import android.text.style.URLSpan;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowManager;
@@ -311,10 +314,18 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         } catch (PackageManager.NameNotFoundException exception) {
             version = getString(R.string.version_unknown);
         }
-        showSheet(R.string.about, getString(R.string.about_message, version), android.R.string.ok, null, false);
+        SpannableString message = new SpannableString(getString(R.string.about_message, version));
+        int github = message.toString().indexOf("GitHub");
+        if (github >= 0) message.setSpan(new URLSpan("https://github.com/miaonai/HyperOS_FCM_Live"),
+                github, github + "GitHub".length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        showSheet(R.string.app_name, message, android.R.string.ok, null, false);
     }
 
     private void filterApps() {
+        filterApps(true);
+    }
+
+    private void filterApps(boolean animate) {
         String query = searchView.getQuery().toString().trim().toLowerCase(Locale.ROOT);
         List<AppListAdapter.AppEntry> next = new ArrayList<>();
         for (AppListAdapter.AppEntry app : allApps) {
@@ -325,7 +336,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
         }
         // Stable sort preserves FCM/name order within each enabled/disabled group.
         next.sort((a, b) -> Boolean.compare(b.checked, a.checked));
-        ((AnimatedAppList) findViewById(R.id.app_list)).changeItems(() -> {
+        ((AnimatedAppList) findViewById(R.id.app_list)).changeItems(animate, () -> {
             filteredApps.clear();
             filteredApps.addAll(next);
             adapter.notifyDataSetChanged();
@@ -338,6 +349,10 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
     }
 
     private void refreshSelection() {
+        refreshSelection(true);
+    }
+
+    private void refreshSelection(boolean animate) {
         Set<String> detected = new HashSet<>();
         for (AppListAdapter.AppEntry app : allApps) {
             if (app.containsFcm) detected.add(app.packageName);
@@ -347,7 +362,7 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
             app.automaticallyAllowed = autoFcm && app.containsFcm;
             app.checked = effective.contains(app.packageName);
         }
-        filterApps();
+        filterApps(animate);
     }
 
     private void readPolicy() {
@@ -370,7 +385,8 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                     confirmedAutoFcm = automatic;
                     policyReady = true;
                     adapter.setChangesEnabled(true);
-                    refreshSelection();
+                    // Reading saved policy is initialization, not a user toggling a switch.
+                    refreshSelection(false);
                 });
             } catch (RuntimeException ignored) {
                 // Keep the last known state; edits stay disabled until a successful reload.
@@ -472,14 +488,14 @@ public class MainActivity extends Activity implements SearchView.OnQueryTextList
                     loadFailed = false;
                     allApps.clear();
                     allApps.addAll(result);
-                    refreshSelection();
+                    refreshSelection(false);
                 });
             } catch (RuntimeException exception) {
                 runOnUiThread(() -> {
                     if (isDestroyed()) return;
                     loading = false;
                     loadFailed = true;
-                    filterApps();
+                    filterApps(false);
                 });
             }
         });

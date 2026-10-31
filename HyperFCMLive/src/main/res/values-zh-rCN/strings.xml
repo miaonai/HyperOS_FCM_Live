@@ -26,6 +26,6 @@
     <string name="open_diagnostics">打开 FCM Diagnostics</string>
     <string name="diagnostics_unavailable">无法打开 FCM Diagnostics，请检查 Google Play 服务是否已安装并启用。</string>
     <string name="about">关于</string>
-    <string name="about_message">版本 %1$s\n\n管理国行 HyperOS 上允许 FCM 唤醒的应用。\n\n“包含 FCM”表示检测到 FCM 组件，不代表已注册或推送一定可达。自动放行也适用于后来安装的 FCM 应用，关闭后恢复手动选择。\n\n需要 LSPosed，修改会自动保存。\n\n界面参考 XiaoTong6666/Sui 的 MIUIX 风格。</string>
+    <string name="about_message">v%1$s\n\n本项目遵循 GPLv3，在 GitHub 开源。\nCopyright (c) 2026 Hyper FCM Live Contributors\n\n贡献者：Howard20181、zuohl、miaonai</string>
     <string name="version_unknown">未知</string>
 </resources>

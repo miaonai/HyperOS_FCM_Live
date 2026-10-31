@@ -8,6 +8,7 @@ import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.os.Build;
+import android.text.method.LinkMovementMethod;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -95,7 +96,14 @@ final class ManagementSheet extends AlertDialog {
         int accent = getContext().getColor(R.color.accent);
         int primaryText = getContext().getColor(R.color.text_primary);
         int neutral = blend(getContext().getColor(R.color.surface), primaryText, 0.08f);
-        if (positive != null) styleButton(positive, accent, Color.WHITE, 0x30FFFFFF);
+        TextView message = findViewById(android.R.id.message);
+        if (message != null) {
+            message.setMovementMethod(LinkMovementMethod.getInstance());
+            message.setLinkTextColor(accent);
+        }
+        boolean confirmation = negative != null && negative.getVisibility() == View.VISIBLE;
+        if (positive != null) styleButton(positive, confirmation ? accent : neutral,
+                confirmation ? Color.WHITE : primaryText, confirmation ? 0x30FFFFFF : 0x18000000);
         if (negative != null) styleButton(negative, neutral, primaryText, 0x18000000);
 
         View buttonParent = positive != null ? (View) positive.getParent()

@@ -40,14 +40,15 @@ public final class AnimatedAppList extends ListView {
         return count - 1 - drawingPosition;
     }
 
-    void changeItems(Runnable change) {
+    void changeItems(boolean animate, Runnable change) {
         Map<String, Float> previous = new HashMap<>();
         Set<String> stillRevealing = new HashSet<>(revealed);
         Set<String> previousKeys = new HashSet<>();
         if (getAdapter() instanceof AppListAdapter adapter) {
             for (int i = 0; i < adapter.getCount(); i++) previousKeys.add(adapter.getItem(i).packageName);
         }
-        if (isLaidOut() && ValueAnimator.areAnimatorsEnabled()) {
+        boolean keepViewport = isLaidOut() && getChildCount() > 0;
+        if (animate && keepViewport && ValueAnimator.areAnimatorsEnabled()) {
             for (int i = 0; i < getChildCount(); i++) {
                 View row = getChildAt(i);
                 String key = AppListAdapter.boundPackage(row);
@@ -60,7 +61,14 @@ public final class AnimatedAppList extends ListView {
         change.run();
         // In touch mode ListView may read the selected row's ID while syncing a data change.
         // An empty result has no valid anchor, so leave its layout to the data-set notification.
-        if (getCount() == 0 || previous.isEmpty()) return;
+        if (getCount() == 0 || !keepViewport) return;
+        if (!animate) {
+            // Restored policy and package snapshots replace the visible state atomically.
+            // Stable IDs must not make ListView scroll after the old first row as it reorders.
+            setSelectionFromTop(Math.min(first, getCount() - 1), top - getPaddingTop());
+            return;
+        }
+        if (previous.isEmpty()) return;
         if (getAdapter() instanceof AppListAdapter adapter) {
             for (int i = 0; i < adapter.getCount(); i++) {
                 String key = adapter.getItem(i).packageName;
