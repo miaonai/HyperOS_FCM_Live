@@ -178,6 +178,30 @@ public class ManagementUiTest {
     }
 
     @Test @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    public void expandedSearchHasNoCircularHighlightBehindTheMagnifier() {
+        View root = activity.findViewById(R.id.root);
+        layoutForMotion(root);
+        SearchControl search = activity.findViewById(R.id.search_view);
+        search.setIconified(false);
+        settleMotion();
+        View magnifier = search.getChildAt(1);
+        magnifier.setFocusableInTouchMode(true);
+        magnifier.requestFocus();
+        for (boolean pressed : new boolean[]{false, true}) {
+            magnifier.setPressed(pressed);
+            if (magnifier.getBackground() != null) magnifier.getBackground().jumpToCurrentState();
+            Bitmap bitmap = Bitmap.createBitmap(search.getWidth(), search.getHeight(), Bitmap.Config.ARGB_8888);
+            try {
+                search.draw(new Canvas(bitmap));
+                assertEquals("The expanded capsule must have one uniform surface, including behind a focused/pressed icon",
+                        activity.getColor(R.color.search_surface), bitmap.getPixel(24, 8));
+            } finally { bitmap.recycle(); }
+        }
+        magnifier.setPressed(false);
+        magnifier.clearFocus();
+    }
+
+    @Test @GraphicsMode(GraphicsMode.Mode.NATIVE)
     public void unmatchedSearchShowsEmptyStateAndClearingRestoresApps() {
         View root = activity.findViewById(R.id.root);
         layoutForMotion(root);
