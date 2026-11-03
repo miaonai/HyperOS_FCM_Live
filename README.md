@@ -1,4 +1,8 @@
-# Hyper FCM Live
+<p align="center">
+  <img src="assets/branding/icon.png" width="192" height="192" alt="Hyper FCM Live 图标">
+</p>
+
+<h1 align="center">Hyper FCM Live</h1>
 
 面向国行 HyperOS 的 LSPosed 模块，配有 MIUIX 风格的管理 App。解除系统对 Google FCM 连接广播和应用唤醒的限制，让所选应用能够通过 FCM 接收后台推送。
 

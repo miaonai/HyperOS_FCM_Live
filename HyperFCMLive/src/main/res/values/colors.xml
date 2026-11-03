@@ -11,5 +11,5 @@
     <color name="switch_thumb">#FFFFFF</color>
     <color name="header_tint">#CCF7F7F7</color>
     <color name="press_overlay">#10000000</color>
-    <color name="icon_background">#3482FF</color>
+    <color name="icon_background">#C6E9FC</color>
 </resources>
